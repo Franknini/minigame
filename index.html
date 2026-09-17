@@ -17,6 +17,26 @@
 <canvas id="c"></canvas>
 <script>
 (function(){
+ // ★ 手機全螢幕：第一次點擊畫面時自動觸發
+function tryFullscreen(){
+  var el = document.documentElement;
+  if (el.requestFullscreen) {
+    el.requestFullscreen();
+  } else if (el.webkitRequestFullscreen) {
+    el.webkitRequestFullscreen();
+  } else if (el.msRequestFullscreen) {
+    el.msRequestFullscreen();
+  }
+  // 嘗試鎖定橫向（部分手機支援）
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('landscape').catch(function(){});
+  }
+  // 觸發一次後移除監聽，避免一直跳
+  document.removeEventListener('touchstart', tryFullscreen);
+  document.removeEventListener('click', tryFullscreen);
+}
+document.addEventListener('touchstart', tryFullscreen, { once: true });
+document.addEventListener('click', tryFullscreen, { once: true });
 'use strict';
 
 var canvas = document.getElementById('c');
