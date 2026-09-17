@@ -17,26 +17,6 @@
 <canvas id="c"></canvas>
 <script>
 (function(){
- // ★ 手機全螢幕：第一次點擊畫面時自動觸發
-function tryFullscreen(){
-  var el = document.documentElement;
-  if (el.requestFullscreen) {
-    el.requestFullscreen();
-  } else if (el.webkitRequestFullscreen) {
-    el.webkitRequestFullscreen();
-  } else if (el.msRequestFullscreen) {
-    el.msRequestFullscreen();
-  }
-  // 嘗試鎖定橫向（部分手機支援）
-  if (screen.orientation && screen.orientation.lock) {
-    screen.orientation.lock('landscape').catch(function(){});
-  }
-  // 觸發一次後移除監聽，避免一直跳
-  document.removeEventListener('touchstart', tryFullscreen);
-  document.removeEventListener('click', tryFullscreen);
-}
-document.addEventListener('touchstart', tryFullscreen, { once: true });
-document.addEventListener('click', tryFullscreen, { once: true });
 'use strict';
 
 var canvas = document.getElementById('c');
@@ -44,6 +24,21 @@ var ctx = canvas.getContext('2d');
 var W = 0, H = 0, DPR = 1;
 var cssW = 0, cssH = 0;
 var viewOffsetX = 0, viewOffsetY = 0;
+
+// ★ 自動全螢幕（第一次點擊時觸發）
+function tryFullscreen(){
+  var el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen();
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  else if (el.msRequestFullscreen) el.msRequestFullscreen();
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('landscape').catch(function(){});
+  }
+  document.removeEventListener('touchstart', tryFullscreen);
+  document.removeEventListener('click', tryFullscreen);
+}
+document.addEventListener('touchstart', tryFullscreen, { once: true });
+document.addEventListener('click', tryFullscreen, { once: true });
 
 function resize(){
   DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -122,21 +117,25 @@ var COMBO_WINDOW    = 3.0;
 var TIME_SCORE_BASE = 8;
 var TIME_SCORE_RAMP = 20;
 
-/* ★ 紫色雷電參數 */
-var WARN_LIGHTNING       = 3.2;      // 預警時間
-var LIGHTNING_SPEED      = 40;       // 移動速度 (px/s)
-var LIGHTNING_THICK      = 10;       // 線條厚度
-var LIGHTNING_DANGER     = 90;       // 玩家接近危險距離
-var LIGHTNING_GRAZE      = 80;       // 驚險加分（比子彈少）
-var OBS_LIGHTNING_HP     = 2.0;      // 障礙物持續暴露多久被破壞 (秒)
-var OBS_LIGHTNING_REGEN  = 2.5;      // 離開雷電後每秒恢復多少暴露值
+var WARN_LIGHTNING       = 3.2;
+var LIGHTNING_SPEED      = 82;
+var LIGHTNING_THICK      = 10;
+var LIGHTNING_DANGER     = 90;
+var LIGHTNING_GRAZE      = 80;
+var OBS_LIGHTNING_HP     = 2.0;
+var OBS_LIGHTNING_REGEN  = 2.5;
+
+var HEART_R              = 18;
+var HEART_LIFE           = 15.0;
+var HEART_SPAWN_DELAY    = 5.0;
+var HEART_SPAWN_COOLDOWN = 8.0;
 
 /* ===================== 狀態 ===================== */
 var state = 'ready';
 var player = { x:0, y:0, vx:0, vy:0, r:PLAYER_R };
 var obstacles = [];
 var bullets = [];
-var lightnings = [];        // 雷電陣列
+var lightnings = [];
 var swapOrbs = [];
 var pending = [];
 var particles = [];
@@ -145,6 +144,9 @@ var trails = [];
 var swapEchoes = [];
 var swapTrails = [];
 var floats = [];
+
+var heartPickup = null;
+var heartSpawnTimer = HEART_SPAWN_DELAY;
 
 var elapsed = 0;
 var score = 0;
@@ -219,6 +221,11 @@ function lightningSfx(){
   beep(160, 0.12, 'sawtooth', 0.05);
   setTimeout(function(){ beep(220, 0.09, 'sawtooth', 0.045); }, 55);
   setTimeout(function(){ beep(310, 0.07, 'sawtooth', 0.04); }, 110);
+}
+function heartPickupSfx(){
+  beep(880, 0.08, 'sine', 0.09);
+  setTimeout(function(){ beep(1170, 0.09, 'sine', 0.10); }, 60);
+  setTimeout(function(){ beep(1560, 0.12, 'triangle', 0.09); }, 130);
 }
 
 /* ===================== 工具 ===================== */
@@ -296,6 +303,9 @@ function reset(){
   swapTrails = [];
   floats = [];
 
+  heartPickup = null;
+  heartSpawnTimer = HEART_SPAWN_DELAY;
+
   elapsed = 0;
   score = 0;
   timeScore = 0;
@@ -371,7 +381,7 @@ function spawnObstacle(inside){
     rotV: (Math.random()-0.5)*3,
     hitGlow: 0,
     inside: false,
-    lightningExposure: 0,     // 被雷電累積的曝露時間
+    lightningExposure: 0,
     lightningGlow: 0
   });
 }
@@ -379,10 +389,8 @@ function spawnObstacle(inside){
 /* ===================== 預警 ===================== */
 function queueAttack(type){
   if (type === 'lightning'){
-    // 雷電預警：在即將進入的邊緣顯示紫色閃電圖標
     var lside = Math.floor(Math.random()*4);
     var ix, iy;
-    // 水平線（上/下）：預警放在整條線要出現的位置（用邊緣中段讓玩家知道哪條線）
     if (lside === 0){ ix = W*0.5; iy = 0; }
     else if (lside === 1){ ix = W*0.5; iy = H; }
     else if (lside === 2){ ix = 0; iy = H*0.5; }
@@ -449,7 +457,6 @@ function spawnLightning(lside){
   lightningSfx();
   shake = Math.min(18, shake + 8);
 
-  // 生成時在邊緣做一點紫色粒子
   if (l.horizontal){
     for (var i=0;i<14;i++){
       particles.push({
@@ -563,6 +570,10 @@ function takeDamage(){
   grazeCombo = 0;
   grazeComboTimer = 0;
 
+  if (hp > 0 && hp < MAX_HP && heartPickup === null){
+    heartSpawnTimer = HEART_SPAWN_DELAY;
+  }
+
   if (hp <= 0) die();
 }
 
@@ -623,6 +634,27 @@ function doJump(){
   spawnRing(player.x, player.y, '94,241,255', 55);
   shake = Math.min(14, shake + 5);
   beep(720, 0.07, 'sine', 0.08);
+}
+
+// ★ 左半螢幕的共用行為（點擊左半邊或按空白鍵都會呼叫）
+function handleLeftAction(){
+  if (state === 'ready' || state === 'dead'){
+    if (state === 'dead' && dieTimer < 0.5) return;
+    state = 'playing';
+    reset();
+    return;
+  }
+  if (state !== 'playing') return;
+
+  // 如果正在瞄準，取消瞄準（不觸發彈跳）
+  if (stickActive){
+    stickActive = false;
+    stickPointerId = null;
+    stickMag = 0;
+    beep(300, 0.06, 'sine', 0.05);
+    return;
+  }
+  doJump();
 }
 
 function fireSwapOrb(angle){
@@ -716,14 +748,8 @@ function onPointerDown(e){
   var cx = p.x, cy = p.y;
 
   if (cx < W * 0.5){
-    if (stickActive){
-      stickActive = false;
-      stickPointerId = null;
-      stickMag = 0;
-      beep(300, 0.06, 'sine', 0.05);
-      return;
-    }
-    doJump();
+    // ★ 左半邊：直接呼叫共用函式
+    handleLeftAction();
   } else {
     if (stickPointerId === null){
       stickPointerId = (e.pointerId !== undefined) ? e.pointerId : 1;
@@ -790,17 +816,12 @@ canvas.addEventListener('pointercancel', onPointerCancel);
 canvas.addEventListener('touchstart', function(e){ e.preventDefault(); }, {passive:false});
 canvas.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 
+// ★ 鍵盤：空白鍵 / Enter / W / ↑ 都等於點擊左半螢幕
 window.addEventListener('keydown', function(e){
-  if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW'){
+  if (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowUp' || e.code === 'KeyW'){
     if (e.cancelable) e.preventDefault();
     if (e.repeat) return;
-    if (state === 'ready' || state === 'dead'){
-      if (state === 'dead' && dieTimer < 0.5) return;
-      state = 'playing';
-      reset();
-      return;
-    }
-    doJump();
+    handleLeftAction();
   }
 });
 
@@ -814,7 +835,6 @@ function update(rawDt){
   for (var i=0;i<bullets.length;i++){
     if (bullets[i].inDanger && !bullets[i].safe){ dangerActive = true; break; }
   }
-  // ★ 雷電危險也算入慢速
   if (!dangerActive){
     for (i=0;i<lightnings.length;i++){
       if (lightnings[i].dangerPhase === 'inDanger'){ dangerActive = true; break; }
@@ -906,6 +926,53 @@ function update(rawDt){
   trails.push({ x:player.x, y:player.y, life:0.3, maxLife:0.3 });
   if (trails.length > 26) trails.shift();
 
+  /* ---- ★ 愛心生成與碰撞 ---- */
+  if (hp < MAX_HP && heartPickup === null){
+    heartSpawnTimer -= sdt;
+    if (heartSpawnTimer <= 0){
+      var hx = 70 + Math.random() * (W - 140);
+      var hy = 70 + Math.random() * (H - 140);
+      heartPickup = {
+        x: hx, y: hy,
+        r: HEART_R,
+        life: HEART_LIFE,
+        spawnTime: 0
+      };
+      heartSpawnTimer = HEART_SPAWN_COOLDOWN;
+      spawnRing(hx, hy, '255,120,160', 50);
+      beep(880, 0.12, 'sine', 0.06);
+    }
+  }
+
+  if (heartPickup){
+    heartPickup.life -= sdt;
+    heartPickup.spawnTime += sdt;
+
+    if (hp >= MAX_HP || heartPickup.life <= 0){
+      if (heartPickup.life <= 0){
+        spawnBurst(heartPickup.x, heartPickup.y, '255,120,160', 8, 0.6);
+      }
+      heartPickup = null;
+    } else {
+      var hdx = player.x - heartPickup.x;
+      var hdy = player.y - heartPickup.y;
+      var hr = player.r + heartPickup.r;
+      if (hdx*hdx + hdy*hdy < hr*hr){
+        hp = Math.min(hp + 1, MAX_HP);
+        spawnBurst(heartPickup.x, heartPickup.y, '255,120,160', 20, 1.3);
+        spawnBurst(heartPickup.x, heartPickup.y, '255,255,255', 10, 1.0);
+        spawnRing(heartPickup.x, heartPickup.y, '255,120,160', 90);
+        showFloat(heartPickup.x, heartPickup.y - 30, '+1 HP', '#ff6b8a');
+        heartPickupSfx();
+        heartPickup = null;
+
+        if (hp < MAX_HP){
+          heartSpawnTimer = HEART_SPAWN_DELAY;
+        }
+      }
+    }
+  }
+
   /* ---- 預警更新 ---- */
   for (i=pending.length-1;i>=0;i--){
     var pa = pending[i];
@@ -928,7 +995,7 @@ function update(rawDt){
     }
   }
 
-  /* ---- 生成障礙物（不隨難度變快） ---- */
+  /* ---- 生成障礙物 ---- */
   obsSpawnTimer -= sdt;
   if (obsSpawnTimer <= 0){
     spawnObstacle(false);
@@ -945,7 +1012,6 @@ function update(rawDt){
     o.rot += o.rotV * sdt;
     if (o.hitGlow > 0) o.hitGlow -= vdt * 1.6;
 
-    // 雷電曝露自然恢復
     if (o.lightningExposure > 0){
       o.lightningExposure -= OBS_LIGHTNING_REGEN * sdt;
       if (o.lightningExposure < 0) o.lightningExposure = 0;
@@ -969,7 +1035,7 @@ function update(rawDt){
     }
   }
 
-  /* ---- 生成攻擊（後期變多） ---- */
+  /* ---- 生成攻擊 ---- */
   bulletSpawnTimer -= sdt;
   if (bulletSpawnTimer <= 0){
     var d = difficulty();
@@ -991,7 +1057,6 @@ function update(rawDt){
     if (bombSpawnTimer < 1.8) bombSpawnTimer = 1.8;
   }
 
-  // ★ 雷電生成
   lightningSpawnTimer -= sdt;
   if (lightningSpawnTimer <= 0){
     queueAttack('lightning');
@@ -1002,14 +1067,13 @@ function update(rawDt){
   }
 
   /* ==================================================
-     ★ 雷電更新
+     雷電更新
      ================================================== */
   for (i=lightnings.length-1;i>=0;i--){
     var lt = lightnings[i];
     lt.pos += lt.vel * sdt;
     lt.spawnTime += sdt;
 
-    // 超出螢幕移除
     var out = false;
     if (lt.horizontal){
       if (lt.pos < -100 || lt.pos > H + 100) out = true;
@@ -1017,12 +1081,10 @@ function update(rawDt){
       if (lt.pos < -100 || lt.pos > W + 100) out = true;
     }
     if (out){
-      // 若離開時玩家還在危險內，靜默結束
       lightnings.splice(i, 1);
       continue;
     }
 
-    // 隨機紫色火花粒子
     if (Math.random() < 0.7){
       var sparkX, sparkY;
       if (lt.horizontal){
@@ -1041,7 +1103,6 @@ function update(rawDt){
       });
     }
 
-    // 玩家碰撞：立即受傷
     var distToPlayer;
     if (lt.horizontal) distToPlayer = Math.abs(player.y - lt.pos);
     else distToPlayer = Math.abs(player.x - lt.pos);
@@ -1049,7 +1110,6 @@ function update(rawDt){
     var hitRange = player.r + lt.thickness * 0.5 + 4;
 
     if (distToPlayer < hitRange && invuln <= 0){
-      // 玩家被雷電擊中
       spawnBurst(player.x, player.y, '190,110,255', 30, 1.6);
       spawnBurst(player.x, player.y, '255,255,255', 14, 1.2);
       spawnRing(player.x, player.y, '190,110,255', 110);
@@ -1057,18 +1117,16 @@ function update(rawDt){
       flash = 1;
       beep(90, 0.42, 'sawtooth', 0.18);
       setTimeout(function(){ beep(60, 0.5, 'sawtooth', 0.14); }, 120);
-      lt.dangerPhase = 'none';  // 已命中，不再判定驚險
+      lt.dangerPhase = 'none';
       takeDamage();
       if (state !== 'playing') return;
     }
 
-    // 玩家驚險判定
     if (distToPlayer < LIGHTNING_DANGER){
       if (lt.dangerPhase !== 'inDanger'){
         lt.dangerPhase = 'inDanger';
       }
     } else if (lt.dangerPhase === 'inDanger' && distToPlayer > LIGHTNING_DANGER * 1.4){
-      // 離開危險範圍 → 驚險加分
       if (invuln <= 0){
         var lPts = LIGHTNING_GRAZE * Math.min(1 + grazeCombo * 0.4, 4);
         lPts = Math.floor(lPts);
@@ -1081,7 +1139,6 @@ function update(rawDt){
       lt.dangerPhase = 'none';
     }
 
-    // 障礙物被雷電持續削血
     for (var oi2 = obstacles.length-1; oi2 >= 0; oi2--){
       var oo3 = obstacles[oi2];
       var distToObs;
@@ -1092,7 +1149,6 @@ function update(rawDt){
         oo3.lightningExposure += sdt;
         oo3.lightningGlow = 1;
 
-        // 曝露期間持續火花
         if (Math.random() < 0.5){
           particles.push({
             x: oo3.x + (Math.random()-0.5)*oo3.r*1.5,
@@ -1112,8 +1168,6 @@ function update(rawDt){
         }
       }
     }
-
-    // ★ 藍色交換光球碰到雷電：不處理（穿透）
   }
 
   /* ==================================================
@@ -1483,7 +1537,6 @@ function drawExclamIcon(x, y, alpha){
   ctx.restore();
 }
 
-/* ★ 紫色雷電圖標 */
 function drawLightningIcon(x, y, alpha){
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -1496,7 +1549,6 @@ function drawLightningIcon(x, y, alpha){
   ctx.shadowColor = 'rgba(200,120,255,0.98)';
   ctx.shadowBlur = 22;
 
-  // 閃電形狀
   ctx.beginPath();
   ctx.moveTo(6, -22);
   ctx.lineTo(-10, 2);
@@ -1512,7 +1564,6 @@ function drawLightningIcon(x, y, alpha){
 
 function drawPending(p){
   if (p.type === 'lightning'){
-    // 紫色雷電預警：閃爍 + 紫色光暈
     var liAlpha;
     if (p.timer < 0.4){
       liAlpha = 1;
@@ -1522,7 +1573,6 @@ function drawPending(p){
       if (liAlpha < 0.35) liAlpha = 0.35;
     }
 
-    // 顯示即將到來的線
     if (p.side === 0 || p.side === 1){
       var sy = p.side === 0 ? 0 : H;
       ctx.save();
@@ -1549,7 +1599,6 @@ function drawPending(p){
       ctx.restore();
     }
 
-    // 外圈收縮
     ctx.save();
     ctx.globalAlpha = liAlpha;
     var lpct = 1 - p.timer / p.totalTime;
@@ -1635,14 +1684,12 @@ function drawPending(p){
   drawScopeIcon(p.iconX, p.iconY, alpha);
 }
 
-/* ★ 繪製雷電 */
 function drawLightning(lt){
   var now = performance.now();
   var dangerGlow = (lt.dangerPhase === 'inDanger') ? 1 : 0;
 
   ctx.save();
 
-  // 底層柔和紫光暈
   ctx.shadowColor = 'rgba(180,80,255,0.9)';
   ctx.shadowBlur = 40 + dangerGlow * 20;
   ctx.strokeStyle = 'rgba(180,80,255,0.55)';
@@ -1661,7 +1708,6 @@ function drawLightning(lt){
     ctx.stroke();
   }
 
-  // 中層紫色實線（帶點抖動）
   ctx.shadowBlur = 22;
   ctx.strokeStyle = 'rgba(200,120,255,1)';
   ctx.lineWidth = lt.thickness;
@@ -1693,7 +1739,6 @@ function drawLightning(lt){
     ctx.stroke();
   }
 
-  // 內芯白色亮線
   ctx.shadowBlur = 0;
   ctx.strokeStyle = 'rgba(255,255,255,0.95)';
   ctx.lineWidth = lt.thickness * 0.35;
@@ -1722,7 +1767,6 @@ function drawLightning(lt){
 
   ctx.restore();
 
-  // 危險範圍淡淡提示
   if (dangerGlow > 0){
     ctx.save();
     ctx.globalAlpha = 0.12;
@@ -1777,6 +1821,17 @@ function drawStick(){
   }
 
   ctx.restore();
+}
+
+// ★ 繪製愛心形狀（共用）
+function drawHeartShape(c, x, y, s){
+  c.beginPath();
+  c.moveTo(x, y + s * 0.4);
+  c.bezierCurveTo(x, y, x - s, y - s * 0.3, x - s, y + s * 0.2);
+  c.bezierCurveTo(x - s, y + s * 0.9, x, y + s * 1.1, x, y + s * 1.6);
+  c.bezierCurveTo(x, y + s * 1.1, x + s, y + s * 0.9, x + s, y + s * 0.2);
+  c.bezierCurveTo(x + s, y - s * 0.3, x, y, x, y + s * 0.4);
+  c.closePath();
 }
 
 function draw(){
@@ -1852,13 +1907,11 @@ function draw(){
     ctx.restore();
   }
 
-  // 障礙物
   for (i=0;i<obstacles.length;i++){
     o = obstacles[i];
     var glow = o.hitGlow > 0 ? o.hitGlow : 0;
     var lGlow = o.lightningGlow > 0 ? o.lightningGlow : 0;
 
-    // 被雷電削血中的障礙物：紫色污染
     ctx.save();
     if (lGlow > 0.1){
       ctx.shadowColor = 'rgba(200,120,255,' + (0.6 + lGlow*0.35) + ')';
@@ -1902,9 +1955,75 @@ function draw(){
   }
   ctx.globalAlpha = 1;
 
-  // ★ 雷電（在光球下方繪製，讓光球看起來在上面）
   for (i=0;i<lightnings.length;i++){
     drawLightning(lightnings[i]);
+  }
+
+  // ★ 愛心（更精緻的圖示）
+  if (heartPickup){
+    var hpPulse = 0.75 + 0.25 * Math.sin(performance.now()/220);
+    var lifeRatio = Math.max(0, heartPickup.life / HEART_LIFE);
+
+    ctx.save();
+
+    // 外層光暈
+    var hglow = ctx.createRadialGradient(
+      heartPickup.x, heartPickup.y, 0,
+      heartPickup.x, heartPickup.y, heartPickup.r * 3.2
+    );
+    hglow.addColorStop(0, 'rgba(255,120,160,' + (0.55 * hpPulse) + ')');
+    hglow.addColorStop(0.5, 'rgba(255,80,120,' + (0.2 * hpPulse) + ')');
+    hglow.addColorStop(1, 'rgba(255,80,120,0)');
+    ctx.fillStyle = hglow;
+    ctx.beginPath();
+    ctx.arc(heartPickup.x, heartPickup.y, heartPickup.r * 3.2, 0, Math.PI*2);
+    ctx.fill();
+
+    // 愛心本體
+    ctx.translate(heartPickup.x, heartPickup.y);
+    ctx.scale(hpPulse, hpPulse);
+
+    // 陰影
+    ctx.shadowColor = 'rgba(255,80,120,0.95)';
+    ctx.shadowBlur = 24;
+    ctx.fillStyle = '#c81e45';
+    drawHeartShape(ctx, 0, 0, heartPickup.r * 0.95);
+    ctx.fill();
+
+    // 內部漸層
+    ctx.shadowBlur = 0;
+    var hg = ctx.createRadialGradient(
+      -heartPickup.r*0.35, -heartPickup.r*0.35, 0,
+      0, 0, heartPickup.r * 0.95
+    );
+    hg.addColorStop(0, '#ffffff');
+    hg.addColorStop(0.35, '#ff8fa8');
+    hg.addColorStop(1, '#e0254f');
+    ctx.fillStyle = hg;
+    drawHeartShape(ctx, 0, 0, heartPickup.r * 0.95);
+    ctx.fill();
+
+    // 白色高光
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath();
+    ctx.ellipse(
+      -heartPickup.r*0.35, -heartPickup.r*0.25,
+      heartPickup.r*0.22, heartPickup.r*0.13,
+      -0.5, 0, Math.PI*2
+    );
+    ctx.fill();
+
+    ctx.restore();
+
+    // 剩餘時間圈
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,180,200,0.8)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(heartPickup.x, heartPickup.y, heartPickup.r + 8,
+      -Math.PI/2, -Math.PI/2 + Math.PI*2 * lifeRatio);
+    ctx.stroke();
+    ctx.restore();
   }
 
   for (i=0;i<swapOrbs.length;i++){
@@ -2131,13 +2250,7 @@ function draw(){
 
 /* ===================== HUD ===================== */
 function drawHeart(x, y, s){
-  ctx.beginPath();
-  ctx.moveTo(x, y + s * 0.4);
-  ctx.bezierCurveTo(x, y, x - s, y - s * 0.3, x - s, y + s * 0.2);
-  ctx.bezierCurveTo(x - s, y + s * 0.9, x, y + s * 1.1, x, y + s * 1.6);
-  ctx.bezierCurveTo(x, y + s * 1.1, x + s, y + s * 0.9, x + s, y + s * 0.2);
-  ctx.bezierCurveTo(x + s, y - s * 0.3, x, y, x, y + s * 0.4);
-  ctx.closePath();
+  drawHeartShape(ctx, x, y, s);
   ctx.fill();
 }
 
@@ -2192,7 +2305,7 @@ function drawHUD(){
     ctx.textAlign = 'left';
     ctx.font = '600 12px sans-serif';
     ctx.fillStyle = 'rgba(94,241,255,0.6)';
-    ctx.fillText('◀ 點左半：彈跳', 22, H - 26);
+    ctx.fillText('◀ 點左半 / 空白鍵：彈跳', 22, H - 26);
     ctx.textAlign = 'right';
     ctx.fillStyle = 'rgba(255,215,107,0.6)';
     ctx.fillText('按住右半拖曳搖桿・放開發射 ▶', W - 22, H - 26);
@@ -2201,7 +2314,7 @@ function drawHUD(){
       ctx.textAlign = 'center';
       ctx.font = '700 14px sans-serif';
       ctx.fillStyle = 'rgba(255,215,107,0.95)';
-      ctx.fillText('點左半螢幕取消', W/2, H - 52);
+      ctx.fillText('點左半螢幕或按空白鍵取消', W/2, H - 52);
     }
   }
 
@@ -2218,21 +2331,21 @@ function drawHUD(){
 
     ctx.font = '600 13px sans-serif';
     ctx.fillStyle = 'rgba(94,241,255,0.95)';
-    ctx.fillText('點左半 → 朝反重力彈跳', W/2, H*0.10 + 40);
+    ctx.fillText('點左半 / 空白鍵 → 朝反重力彈跳', W/2, H*0.10 + 40);
     ctx.fillStyle = 'rgba(255,215,107,0.95)';
     ctx.fillText('按住右半拖曳搖桿 → 放開發射藍色交換光球', W/2, H*0.10 + 62);
     ctx.fillStyle = 'rgba(255,140,165,0.9)';
-    ctx.fillText('瞄準中點左半可取消', W/2, H*0.10 + 84);
+    ctx.fillText('瞄準中點左半或按空白鍵可取消', W/2, H*0.10 + 84);
 
     ctx.font = '500 12px sans-serif';
     ctx.fillStyle = 'rgba(200,120,255,0.95)';
     ctx.fillText('★ 紫色雷電會緩緩橫掠全場，碰到立即受傷', W/2, H*0.10 + 114);
+    ctx.fillStyle = 'rgba(255,120,160,0.95)';
+    ctx.fillText('★ 血量未滿時會出現愛心，吃到可補 1 顆血', W/2, H*0.10 + 134);
     ctx.fillStyle = 'rgba(180,215,255,0.72)';
-    ctx.fillText('藍色光球可以穿透雷電　障礙物會被慢慢燒毀', W/2, H*0.10 + 134);
+    ctx.fillText('藍色光球可以穿透雷電　障礙物會被慢慢燒毀', W/2, H*0.10 + 158);
     ctx.fillStyle = 'rgba(255,180,120,0.95)';
-    ctx.fillText('存活越久分數越高，驚險逃離可累積 Combo', W/2, H*0.10 + 158);
-    ctx.fillStyle = 'rgba(140,220,180,0.85)';
-    ctx.fillText('子彈 / 狙擊 / 炸彈 / 雷電　四種攻擊', W/2, H*0.10 + 178);
+    ctx.fillText('存活越久分數越高，驚險逃離可累積 Combo', W/2, H*0.10 + 178);
 
     var pulse = 0.55 + Math.sin(performance.now()/380)*0.45;
     ctx.globalAlpha = pulse;
