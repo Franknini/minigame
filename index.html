@@ -75,7 +75,6 @@ var DANGER_EXIT     = 1.35;
 
 var GRAZE_SCORE     = 180;
 var BOMB_GRAZE_SCORE= 260;
-var SWAP_SCORE      = 25;
 var MAX_HP          = 3;
 var INVULN_HIT      = 1.6;
 var INVULN_SWAP     = 0.4;
@@ -99,11 +98,25 @@ var BOUNCE_REST_PB  = 0.85;
 var BOUNCE_REST_OB  = 0.70;
 var BOUNCE_FX_MIN   = 110;
 
+var COMBO_WINDOW    = 3.0;
+var TIME_SCORE_BASE = 8;
+var TIME_SCORE_RAMP = 20;
+
+/* ★ 紫色雷電參數 */
+var WARN_LIGHTNING       = 3.2;      // 預警時間
+var LIGHTNING_SPEED      = 82;       // 移動速度 (px/s)
+var LIGHTNING_THICK      = 10;       // 線條厚度
+var LIGHTNING_DANGER     = 90;       // 玩家接近危險距離
+var LIGHTNING_GRAZE      = 80;       // 驚險加分（比子彈少）
+var OBS_LIGHTNING_HP     = 2.0;      // 障礙物持續暴露多久被破壞 (秒)
+var OBS_LIGHTNING_REGEN  = 2.5;      // 離開雷電後每秒恢復多少暴露值
+
 /* ===================== 狀態 ===================== */
 var state = 'ready';
 var player = { x:0, y:0, vx:0, vy:0, r:PLAYER_R };
 var obstacles = [];
 var bullets = [];
+var lightnings = [];        // 雷電陣列
 var swapOrbs = [];
 var pending = [];
 var particles = [];
@@ -115,6 +128,7 @@ var floats = [];
 
 var elapsed = 0;
 var score = 0;
+var timeScore = 0;
 var best = 0;
 var hp = MAX_HP;
 var invuln = 0;
@@ -126,6 +140,7 @@ var dieTimer = 0;
 var obsSpawnTimer = 1.5;
 var bulletSpawnTimer = 2.4;
 var bombSpawnTimer = 5.5;
+var lightningSpawnTimer = 10.0;
 
 var stickActive = false;
 var stickPointerId = null;
@@ -134,11 +149,11 @@ var stickX = 0, stickY = 0;
 var stickAngle = 0;
 var stickMag = 0;
 
-var swapCombo = 0;
-var swapComboTimer = 0;
+var grazeCombo = 0;
+var grazeComboTimer = 0;
 var dangerActive = false;
 
-try { best = parseInt(localStorage.getItem('swapper9_best') || '0', 10) || 0; } catch(e){ best = 0; }
+try { best = parseInt(localStorage.getItem('swapper12_best') || '0', 10) || 0; } catch(e){ best = 0; }
 
 /* ===================== 音效 ===================== */
 var audioCtx = null;
@@ -179,6 +194,11 @@ function sweep(f1, f2, dur, vol){
     o.start();
     o.stop(audioCtx.currentTime + dur + 0.02);
   } catch(e){}
+}
+function lightningSfx(){
+  beep(160, 0.12, 'sawtooth', 0.05);
+  setTimeout(function(){ beep(220, 0.09, 'sawtooth', 0.045); }, 55);
+  setTimeout(function(){ beep(310, 0.07, 'sawtooth', 0.04); }, 110);
 }
 
 /* ===================== 工具 ===================== */
@@ -246,6 +266,7 @@ function reset(){
 
   obstacles = [];
   bullets = [];
+  lightnings = [];
   swapOrbs = [];
   pending = [];
   particles = [];
@@ -257,6 +278,7 @@ function reset(){
 
   elapsed = 0;
   score = 0;
+  timeScore = 0;
   hp = MAX_HP;
   invuln = 1.2;
   jumpCd = 0;
@@ -267,13 +289,14 @@ function reset(){
   obsSpawnTimer = 1.2;
   bulletSpawnTimer = 2.4;
   bombSpawnTimer = 5.5;
+  lightningSpawnTimer = 9.0;
 
   stickActive = false;
   stickPointerId = null;
   stickMag = 0;
 
-  swapCombo = 0;
-  swapComboTimer = 0;
+  grazeCombo = 0;
+  grazeComboTimer = 0;
   dangerActive = false;
 
   for (var i=0;i<3;i++) spawnObstacle(true);
@@ -327,37 +350,109 @@ function spawnObstacle(inside){
     rot: Math.random()*Math.PI*2,
     rotV: (Math.random()-0.5)*3,
     hitGlow: 0,
-    inside: false
+    inside: false,
+    lightningExposure: 0,     // 被雷電累積的曝露時間
+    lightningGlow: 0
   });
 }
 
 /* ===================== 預警 ===================== */
 function queueAttack(type){
+  if (type === 'lightning'){
+    // 雷電預警：在即將進入的邊緣顯示紫色閃電圖標
+    var lside = Math.floor(Math.random()*4);
+    var ix, iy;
+    // 水平線（上/下）：預警放在整條線要出現的位置（用邊緣中段讓玩家知道哪條線）
+    if (lside === 0){ ix = W*0.5; iy = 0; }
+    else if (lside === 1){ ix = W*0.5; iy = H; }
+    else if (lside === 2){ ix = 0; iy = H*0.5; }
+    else { ix = W; iy = H*0.5; }
+
+    pending.push({
+      type: 'lightning',
+      side: lside,
+      iconX: ix,
+      iconY: iy,
+      timer: WARN_LIGHTNING,
+      totalTime: WARN_LIGHTNING,
+      aimAngle: 0
+    });
+    return;
+  }
+
   var side = Math.floor(Math.random()*4);
   var margin = 70;
-  var ix, iy;
-  if (side === 0){ ix = margin + Math.random()*(W-margin*2); iy = 0; }
-  else if (side === 1){ ix = margin + Math.random()*(W-margin*2); iy = H; }
-  else if (side === 2){ ix = 0; iy = margin + Math.random()*(H-margin*2); }
-  else { ix = W; iy = margin + Math.random()*(H-margin*2); }
+  var ix2, iy2;
+  if (side === 0){ ix2 = margin + Math.random()*(W-margin*2); iy2 = 0; }
+  else if (side === 1){ ix2 = margin + Math.random()*(W-margin*2); iy2 = H; }
+  else if (side === 2){ ix2 = 0; iy2 = margin + Math.random()*(H-margin*2); }
+  else { ix2 = W; iy2 = margin + Math.random()*(H-margin*2); }
 
   var totalTime = (type === 'bomb') ? WARN_BOMB : (type === 'sniper' ? WARN_SNIPER : WARN_NORMAL);
 
   var p = {
     type: type,
     side: side,
-    iconX: ix,
-    iconY: iy,
+    iconX: ix2,
+    iconY: iy2,
     timer: totalTime,
     totalTime: totalTime,
     aimAngle: 0
   };
 
   if (type === 'normal' || type === 'sniper'){
-    p.aimAngle = Math.atan2(player.y - iy, player.x - ix);
+    p.aimAngle = Math.atan2(player.y - iy2, player.x - ix2);
   }
 
   pending.push(p);
+}
+
+/* ===================== 生成雷電 ===================== */
+function spawnLightning(lside){
+  var l = {
+    type: 'lightning',
+    side: lside,
+    horizontal: (lside === 0 || lside === 1),
+    pos: 0,
+    vel: 0,
+    thickness: LIGHTNING_THICK,
+    dangerPhase: 'none',
+    jitterSeed: Math.random()*1000,
+    spawnTime: 0
+  };
+  if (lside === 0){ l.pos = -30; l.vel =  LIGHTNING_SPEED; }
+  if (lside === 1){ l.pos = H+30; l.vel = -LIGHTNING_SPEED; }
+  if (lside === 2){ l.pos = -30; l.vel =  LIGHTNING_SPEED; }
+  if (lside === 3){ l.pos = W+30; l.vel = -LIGHTNING_SPEED; }
+  lightnings.push(l);
+
+  lightningSfx();
+  shake = Math.min(18, shake + 8);
+
+  // 生成時在邊緣做一點紫色粒子
+  if (l.horizontal){
+    for (var i=0;i<14;i++){
+      particles.push({
+        x: Math.random()*W,
+        y: l.side === 0 ? 0 : H,
+        vx: (Math.random()-0.5)*80,
+        vy: (l.side === 0 ? 1 : -1) * (60 + Math.random()*120),
+        life: 0.5 + Math.random()*0.4, maxLife: 0.9,
+        color: '190,110,255', r: 1.5 + Math.random()*2.2
+      });
+    }
+  } else {
+    for (var j=0;j<14;j++){
+      particles.push({
+        x: l.side === 2 ? 0 : W,
+        y: Math.random()*H,
+        vx: (l.side === 2 ? 1 : -1) * (60 + Math.random()*120),
+        vy: (Math.random()-0.5)*80,
+        life: 0.5 + Math.random()*0.4, maxLife: 0.9,
+        color: '190,110,255', r: 1.5 + Math.random()*2.2
+      });
+    }
+  }
 }
 
 /* ===================== 發射 ===================== */
@@ -376,7 +471,6 @@ function fireBullet(x, y, angle, type){
     inDanger: false,
     wasInDanger: false,
     hitPlayer: false,
-    playerSwapped: false,
     safe: false
   };
 
@@ -407,7 +501,6 @@ function fireBomb(x, y, side){
     inDanger: false,
     wasInDanger: false,
     hitPlayer: false,
-    playerSwapped: false,
     safe: false
   };
 
@@ -440,7 +533,20 @@ function showFloat(x, y, text, color){
   floats.push({ x:x, y:y, text:text, color:color, life:1.1, maxLife:1.1 });
 }
 
-/* ===================== 交換光球被擊中 → 玩家受傷並被拖去 ===================== */
+/* ===================== 受傷處理 ===================== */
+function takeDamage(){
+  hp--;
+  invuln = INVULN_HIT;
+  shake = Math.min(34, shake + 24);
+  flash = 1;
+
+  grazeCombo = 0;
+  grazeComboTimer = 0;
+
+  if (hp <= 0) die();
+}
+
+/* ===================== 交換光球被擊中 ===================== */
 function applyOrbDamage(so){
   var ox = so.x, oy = so.y;
 
@@ -461,17 +567,12 @@ function applyOrbDamage(so){
   player.vx *= 0.3;
   player.vy *= 0.3;
 
-  hp--;
-  invuln = INVULN_HIT;
-  shake = Math.min(34, shake + 24);
-  flash = 1;
-
   spawnRing(player.x, player.y, '255,80,80', 100);
   showFloat(player.x, player.y - 44, '光球被擊中！', '#ff6b8a');
   beep(120, 0.32, 'sawtooth', 0.16);
   setTimeout(function(){ beep(70, 0.35, 'sine', 0.12); }, 90);
 
-  if (hp <= 0) die();
+  takeDamage();
 }
 
 /* ===================== 玩家動作 ===================== */
@@ -528,10 +629,6 @@ function doSwapWith(o){
   var ox = o.x, oy = o.y;
   var ovx = o.vx, ovy = o.vy;
 
-  for (var i=0;i<bullets.length;i++){
-    if (bullets[i].inDanger) bullets[i].playerSwapped = true;
-  }
-
   swapTrails.push({ x1:px, y1:py, x2:ox, y2:oy, life:0.42, maxLife:0.42, color:'94,241,255' });
   swapEchoes.push({ x:px, y:py, r:player.r, life:0.55, maxLife:0.55, color:'94,241,255' });
   swapEchoes.push({ x:ox, y:oy, r:o.r,     life:0.55, maxLife:0.55, color:'255,160,90' });
@@ -553,12 +650,6 @@ function doSwapWith(o){
   shake = Math.min(20, shake + 14);
   flash = Math.min(1, flash + 0.55);
   invuln = Math.max(invuln, INVULN_SWAP);
-
-  swapComboTimer = 2.4;
-  swapCombo++;
-  var pts = SWAP_SCORE * Math.min(swapCombo, 6);
-  score += pts;
-  showFloat(player.x, player.y - 36, '+' + pts, '#ffd76b');
 
   sweep(420, 1300, 0.16, 0.11);
 }
@@ -703,6 +794,12 @@ function update(rawDt){
   for (var i=0;i<bullets.length;i++){
     if (bullets[i].inDanger && !bullets[i].safe){ dangerActive = true; break; }
   }
+  // ★ 雷電危險也算入慢速
+  if (!dangerActive){
+    for (i=0;i<lightnings.length;i++){
+      if (lightnings[i].dangerPhase === 'inDanger'){ dangerActive = true; break; }
+    }
+  }
 
   var timeScale = 1;
   if (dangerActive) timeScale = 1/3;
@@ -752,13 +849,18 @@ function update(rawDt){
   if (state !== 'playing') return;
 
   elapsed += sdt;
-  score += sdt * 3;
+
+  var timeMul = 1 + elapsed / TIME_SCORE_RAMP;
+  var gain = sdt * TIME_SCORE_BASE * timeMul;
+  score += gain;
+  timeScore += gain;
 
   if (invuln > 0) invuln -= sdt;
   if (jumpCd > 0) jumpCd -= sdt;
-  if (swapComboTimer > 0){
-    swapComboTimer -= sdt;
-    if (swapComboTimer <= 0) swapCombo = 0;
+
+  if (grazeComboTimer > 0){
+    grazeComboTimer -= sdt;
+    if (grazeComboTimer <= 0) grazeCombo = 0;
   }
 
   /* ---- 玩家物理 ---- */
@@ -801,6 +903,7 @@ function update(rawDt){
       if (pa.type === 'normal') fireBullet(pa.iconX, pa.iconY, pa.aimAngle, 'normal');
       else if (pa.type === 'sniper') fireBullet(pa.iconX, pa.iconY, pa.aimAngle, 'sniper');
       else if (pa.type === 'bomb') fireBomb(pa.iconX, pa.iconY, pa.side);
+      else if (pa.type === 'lightning') spawnLightning(pa.side);
       pending.splice(i, 1);
     }
   }
@@ -821,6 +924,14 @@ function update(rawDt){
     o.y += o.vy * sdt;
     o.rot += o.rotV * sdt;
     if (o.hitGlow > 0) o.hitGlow -= vdt * 1.6;
+
+    // 雷電曝露自然恢復
+    if (o.lightningExposure > 0){
+      o.lightningExposure -= OBS_LIGHTNING_REGEN * sdt;
+      if (o.lightningExposure < 0) o.lightningExposure = 0;
+    }
+    if (o.lightningGlow > 0) o.lightningGlow -= vdt * 2.5;
+    if (o.lightningGlow < 0) o.lightningGlow = 0;
 
     if (!o.inside && o.x > 0 && o.x < W && o.y > 0 && o.y < H) o.inside = true;
 
@@ -858,6 +969,131 @@ function update(rawDt){
     if (d2 > 0.8 && Math.random() < 0.35) queueAttack('bomb');
     bombSpawnTimer = (7.0 - d2*4.5) + Math.random()*2.0;
     if (bombSpawnTimer < 1.8) bombSpawnTimer = 1.8;
+  }
+
+  // ★ 雷電生成
+  lightningSpawnTimer -= sdt;
+  if (lightningSpawnTimer <= 0){
+    queueAttack('lightning');
+    var d3 = difficulty();
+    if (d3 > 0.7 && Math.random() < 0.3) queueAttack('lightning');
+    lightningSpawnTimer = (11.0 - d3*5.0) + Math.random()*4.0;
+    if (lightningSpawnTimer < 5.5) lightningSpawnTimer = 5.5;
+  }
+
+  /* ==================================================
+     ★ 雷電更新
+     ================================================== */
+  for (i=lightnings.length-1;i>=0;i--){
+    var lt = lightnings[i];
+    lt.pos += lt.vel * sdt;
+    lt.spawnTime += sdt;
+
+    // 超出螢幕移除
+    var out = false;
+    if (lt.horizontal){
+      if (lt.pos < -100 || lt.pos > H + 100) out = true;
+    } else {
+      if (lt.pos < -100 || lt.pos > W + 100) out = true;
+    }
+    if (out){
+      // 若離開時玩家還在危險內，靜默結束
+      lightnings.splice(i, 1);
+      continue;
+    }
+
+    // 隨機紫色火花粒子
+    if (Math.random() < 0.7){
+      var sparkX, sparkY;
+      if (lt.horizontal){
+        sparkX = Math.random()*W;
+        sparkY = lt.pos + (Math.random()-0.5)*lt.thickness*3;
+      } else {
+        sparkX = lt.pos + (Math.random()-0.5)*lt.thickness*3;
+        sparkY = Math.random()*H;
+      }
+      particles.push({
+        x: sparkX, y: sparkY,
+        vx: (Math.random()-0.5)*120,
+        vy: (Math.random()-0.5)*120,
+        life: 0.25 + Math.random()*0.35, maxLife: 0.6,
+        color: '200,130,255', r: 1 + Math.random()*1.8
+      });
+    }
+
+    // 玩家碰撞：立即受傷
+    var distToPlayer;
+    if (lt.horizontal) distToPlayer = Math.abs(player.y - lt.pos);
+    else distToPlayer = Math.abs(player.x - lt.pos);
+
+    var hitRange = player.r + lt.thickness * 0.5 + 4;
+
+    if (distToPlayer < hitRange && invuln <= 0){
+      // 玩家被雷電擊中
+      spawnBurst(player.x, player.y, '190,110,255', 30, 1.6);
+      spawnBurst(player.x, player.y, '255,255,255', 14, 1.2);
+      spawnRing(player.x, player.y, '190,110,255', 110);
+      shake = Math.min(36, shake + 26);
+      flash = 1;
+      beep(90, 0.42, 'sawtooth', 0.18);
+      setTimeout(function(){ beep(60, 0.5, 'sawtooth', 0.14); }, 120);
+      lt.dangerPhase = 'none';  // 已命中，不再判定驚險
+      takeDamage();
+      if (state !== 'playing') return;
+    }
+
+    // 玩家驚險判定
+    if (distToPlayer < LIGHTNING_DANGER){
+      if (lt.dangerPhase !== 'inDanger'){
+        lt.dangerPhase = 'inDanger';
+      }
+    } else if (lt.dangerPhase === 'inDanger' && distToPlayer > LIGHTNING_DANGER * 1.4){
+      // 離開危險範圍 → 驚險加分
+      if (invuln <= 0){
+        var lPts = LIGHTNING_GRAZE * Math.min(1 + grazeCombo * 0.4, 4);
+        lPts = Math.floor(lPts);
+        score += lPts;
+        grazeCombo++;
+        grazeComboTimer = COMBO_WINDOW;
+        showFloat(player.x, player.y - 42, '+' + lPts + ' 雷電 x' + grazeCombo, '#c07bff');
+        beep(1050, 0.12, 'triangle', 0.08);
+      }
+      lt.dangerPhase = 'none';
+    }
+
+    // 障礙物被雷電持續削血
+    for (var oi2 = obstacles.length-1; oi2 >= 0; oi2--){
+      var oo3 = obstacles[oi2];
+      var distToObs;
+      if (lt.horizontal) distToObs = Math.abs(oo3.y - lt.pos);
+      else distToObs = Math.abs(oo3.x - lt.pos);
+
+      if (distToObs < oo3.r + lt.thickness * 0.5){
+        oo3.lightningExposure += sdt;
+        oo3.lightningGlow = 1;
+
+        // 曝露期間持續火花
+        if (Math.random() < 0.5){
+          particles.push({
+            x: oo3.x + (Math.random()-0.5)*oo3.r*1.5,
+            y: oo3.y + (Math.random()-0.5)*oo3.r*1.5,
+            vx: (Math.random()-0.5)*140,
+            vy: (Math.random()-0.5)*140,
+            life: 0.3 + Math.random()*0.3, maxLife: 0.6,
+            color: '220,160,255', r: 1.2 + Math.random()*2
+          });
+        }
+
+        if (oo3.lightningExposure >= OBS_LIGHTNING_HP){
+          spawnBurst(oo3.x, oo3.y, '200,130,255', 22, 1.4);
+          spawnRing(oo3.x, oo3.y, '200,130,255', 80);
+          breakObstacle(oo3);
+          obstacles.splice(oi2, 1);
+        }
+      }
+    }
+
+    // ★ 藍色交換光球碰到雷電：不處理（穿透）
   }
 
   /* ==================================================
@@ -1038,20 +1274,21 @@ function update(rawDt){
         if (!b.safe && invuln <= 0){
           var dd = Math.hypot(player.x - ex, player.y - ey);
           if (dd < explodeR + player.r){
-            hp--;
             b.hitPlayer = true;
-            invuln = INVULN_HIT;
-            shake = Math.min(32, shake + 22);
-            flash = 1;
             spawnRing(player.x, player.y, '255,80,80', 90);
             beep(120, 0.3, 'sawtooth', 0.15);
-            if (hp <= 0){ die(); return; }
+            takeDamage();
+            if (state !== 'playing') return;
           }
         }
 
-        if (b.wasInDanger && !b.playerSwapped && !b.hitPlayer){
-          score += BOMB_GRAZE_SCORE;
-          showFloat(ex, ey - 30, '+' + BOMB_GRAZE_SCORE + ' 驚險', '#ffd76b');
+        if (b.wasInDanger && !b.hitPlayer && !b.safe){
+          var bombPts = BOMB_GRAZE_SCORE * Math.min(1 + grazeCombo * 0.5, 5);
+          bombPts = Math.floor(bombPts);
+          score += bombPts;
+          grazeCombo++;
+          grazeComboTimer = COMBO_WINDOW;
+          showFloat(ex, ey - 30, '+' + bombPts + ' 驚險 x' + grazeCombo, '#ffd76b');
           beep(1200, 0.14, 'triangle', 0.09);
         }
 
@@ -1066,8 +1303,12 @@ function update(rawDt){
     b.life -= sdt;
 
     if (b.x < -140 || b.x > W+140 || b.y < -140 || b.y > H+140){
-      if (b.wasInDanger && b.inDanger && !b.playerSwapped && !b.hitPlayer && !b.safe){
-        score += GRAZE_SCORE;
+      if (b.wasInDanger && b.inDanger && !b.hitPlayer && !b.safe){
+        var outPts = GRAZE_SCORE * Math.min(1 + grazeCombo * 0.5, 5);
+        outPts = Math.floor(outPts);
+        score += outPts;
+        grazeCombo++;
+        grazeComboTimer = COMBO_WINDOW;
       }
       bullets.splice(i,1);
       continue;
@@ -1078,9 +1319,13 @@ function update(rawDt){
     if (!b.safe){
       if (nd < DANGER_R_NORMAL){ b.inDanger = true; b.wasInDanger = true; }
       else if (nd > DANGER_R_NORMAL * DANGER_EXIT && b.inDanger){
-        if (!b.playerSwapped && !b.hitPlayer){
-          score += GRAZE_SCORE;
-          showFloat(player.x, player.y - 42, '+' + GRAZE_SCORE + ' 擦身', '#ffd76b');
+        if (!b.hitPlayer && !b.safe){
+          var pts = GRAZE_SCORE * Math.min(1 + grazeCombo * 0.5, 5);
+          pts = Math.floor(pts);
+          score += pts;
+          grazeCombo++;
+          grazeComboTimer = COMBO_WINDOW;
+          showFloat(player.x, player.y - 42, '+' + pts + ' 擦身 x' + grazeCombo, '#ffd76b');
           beep(1150, 0.12, 'triangle', 0.09);
         }
         b.inDanger = false;
@@ -1105,16 +1350,13 @@ function update(rawDt){
       var pdx = b.x - player.x, pdy = b.y - player.y;
       var prr = b.r + player.r;
       if (pdx*pdx + pdy*pdy < prr*prr){
-        hp--;
         b.hitPlayer = true;
-        invuln = INVULN_HIT;
-        shake = Math.min(28, shake + 18);
-        flash = 1;
         spawnBurst(b.x, b.y, '255,90,90', 20, 1.2);
         spawnRing(player.x, player.y, '255,90,90', 70);
         beep(130, 0.28, 'sawtooth', 0.14);
         bullets.splice(i, 1);
-        if (hp <= 0){ die(); return; }
+        takeDamage();
+        if (state !== 'playing') return;
         continue;
       }
     }
@@ -1133,7 +1375,7 @@ function die(){
   var fs = Math.floor(score);
   if (fs > best){
     best = fs;
-    try { localStorage.setItem('swapper9_best', String(best)); } catch(e){}
+    try { localStorage.setItem('swapper12_best', String(best)); } catch(e){}
   }
   beep(90, 0.5, 'sawtooth', 0.16);
   setTimeout(function(){ beep(60, 0.6, 'sine', 0.12); }, 100);
@@ -1221,7 +1463,87 @@ function drawExclamIcon(x, y, alpha){
   ctx.restore();
 }
 
+/* ★ 紫色雷電圖標 */
+function drawLightningIcon(x, y, alpha){
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+
+  ctx.strokeStyle = 'rgba(200,120,255,0.98)';
+  ctx.fillStyle = 'rgba(200,120,255,0.98)';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(200,120,255,0.98)';
+  ctx.shadowBlur = 22;
+
+  // 閃電形狀
+  ctx.beginPath();
+  ctx.moveTo(6, -22);
+  ctx.lineTo(-10, 2);
+  ctx.lineTo(-1, 2);
+  ctx.lineTo(-6, 22);
+  ctx.lineTo(10, -4);
+  ctx.lineTo(1, -4);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
 function drawPending(p){
+  if (p.type === 'lightning'){
+    // 紫色雷電預警：閃爍 + 紫色光暈
+    var liAlpha;
+    if (p.timer < 0.4){
+      liAlpha = 1;
+    } else {
+      var liFreq = 3 + (p.totalTime - p.timer) * 4;
+      liAlpha = 0.65 + 0.35 * Math.sin(p.timer * liFreq * Math.PI * 2);
+      if (liAlpha < 0.35) liAlpha = 0.35;
+    }
+
+    // 顯示即將到來的線
+    if (p.side === 0 || p.side === 1){
+      var sy = p.side === 0 ? 0 : H;
+      ctx.save();
+      ctx.globalAlpha = 0.20 * liAlpha;
+      ctx.strokeStyle = 'rgba(200,120,255,1)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 12]);
+      ctx.beginPath();
+      ctx.moveTo(0, sy);
+      ctx.lineTo(W, sy);
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      var sx = p.side === 2 ? 0 : W;
+      ctx.save();
+      ctx.globalAlpha = 0.20 * liAlpha;
+      ctx.strokeStyle = 'rgba(200,120,255,1)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 12]);
+      ctx.beginPath();
+      ctx.moveTo(sx, 0);
+      ctx.lineTo(sx, H);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 外圈收縮
+    ctx.save();
+    ctx.globalAlpha = liAlpha;
+    var lpct = 1 - p.timer / p.totalTime;
+    ctx.strokeStyle = 'rgba(200,120,255,0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(p.iconX, p.iconY, 26 + (1-lpct)*10, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.restore();
+
+    drawLightningIcon(p.iconX, p.iconY, liAlpha);
+    return;
+  }
+
   if (p.type === 'bomb'){
     var bpct = 1 - p.timer / p.totalTime;
     drawExclamIcon(p.iconX, p.iconY, 0.95);
@@ -1293,13 +1615,112 @@ function drawPending(p){
   drawScopeIcon(p.iconX, p.iconY, alpha);
 }
 
-/* ★ 幾乎透明的搖桿（已刪除黃色線與白色內芯） */
+/* ★ 繪製雷電 */
+function drawLightning(lt){
+  var now = performance.now();
+  var dangerGlow = (lt.dangerPhase === 'inDanger') ? 1 : 0;
+
+  ctx.save();
+
+  // 底層柔和紫光暈
+  ctx.shadowColor = 'rgba(180,80,255,0.9)';
+  ctx.shadowBlur = 40 + dangerGlow * 20;
+  ctx.strokeStyle = 'rgba(180,80,255,0.55)';
+  ctx.lineWidth = lt.thickness * 3.2;
+  ctx.lineCap = 'round';
+
+  if (lt.horizontal){
+    ctx.beginPath();
+    ctx.moveTo(0, lt.pos);
+    ctx.lineTo(W, lt.pos);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(lt.pos, 0);
+    ctx.lineTo(lt.pos, H);
+    ctx.stroke();
+  }
+
+  // 中層紫色實線（帶點抖動）
+  ctx.shadowBlur = 22;
+  ctx.strokeStyle = 'rgba(200,120,255,1)';
+  ctx.lineWidth = lt.thickness;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  var segs = 22;
+  if (lt.horizontal){
+    ctx.beginPath();
+    for (var i = 0; i <= segs; i++){
+      var sx = i * (W / segs);
+      var off = Math.sin(now/90 + i*0.9 + lt.jitterSeed) * 3.5
+              + (Math.random() - 0.5) * 2.5;
+      var sy = lt.pos + off;
+      if (i === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    for (var k = 0; k <= segs; k++){
+      var sy2 = k * (H / segs);
+      var off2 = Math.sin(now/90 + k*0.9 + lt.jitterSeed) * 3.5
+               + (Math.random() - 0.5) * 2.5;
+      var sx2 = lt.pos + off2;
+      if (k === 0) ctx.moveTo(sx2, sy2);
+      else ctx.lineTo(sx2, sy2);
+    }
+    ctx.stroke();
+  }
+
+  // 內芯白色亮線
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+  ctx.lineWidth = lt.thickness * 0.35;
+
+  if (lt.horizontal){
+    ctx.beginPath();
+    for (var j = 0; j <= segs; j++){
+      var wx = j * (W / segs);
+      var woff = Math.sin(now/90 + j*0.9 + lt.jitterSeed) * 3.5;
+      var wy = lt.pos + woff;
+      if (j === 0) ctx.moveTo(wx, wy);
+      else ctx.lineTo(wx, wy);
+    }
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    for (var n = 0; n <= segs; n++){
+      var wy2 = n * (H / segs);
+      var woff2 = Math.sin(now/90 + n*0.9 + lt.jitterSeed) * 3.5;
+      var wx2 = lt.pos + woff2;
+      if (n === 0) ctx.moveTo(wx2, wy2);
+      else ctx.lineTo(wx2, wy2);
+    }
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  // 危險範圍淡淡提示
+  if (dangerGlow > 0){
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = 'rgba(200,120,255,1)';
+    if (lt.horizontal){
+      ctx.fillRect(0, lt.pos - LIGHTNING_DANGER, W, LIGHTNING_DANGER*2);
+    } else {
+      ctx.fillRect(lt.pos - LIGHTNING_DANGER, 0, LIGHTNING_DANGER*2, H);
+    }
+    ctx.restore();
+  }
+}
+
 function drawStick(){
   if (!stickActive) return;
 
   ctx.save();
 
-  // 外圈底（極淡）
   ctx.beginPath();
   ctx.arc(stickCx, stickCy, STICK_MAX_R, 0, Math.PI*2);
   ctx.fillStyle = 'rgba(255,215,107,0.025)';
@@ -1308,13 +1729,11 @@ function drawStick(){
   ctx.lineWidth = 1.6;
   ctx.stroke();
 
-  // 中央點（極淡）
   ctx.beginPath();
   ctx.arc(stickCx, stickCy, 4, 0, Math.PI*2);
   ctx.fillStyle = 'rgba(255,215,107,0.22)';
   ctx.fill();
 
-  // 拖曳小球（淡）
   ctx.beginPath();
   ctx.arc(stickX, stickY, 18, 0, Math.PI*2);
   ctx.fillStyle = 'rgba(255,215,107,0.10)';
@@ -1323,7 +1742,6 @@ function drawStick(){
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // 方向指示：只保留從玩家出發的紅色預測虛線
   if (stickMag > STICK_MIN_MAG){
     ctx.save();
     ctx.setLineDash([10, 8]);
@@ -1366,7 +1784,7 @@ function draw(){
     ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
   }
 
-  var i, o, b, p, s, l, f, t, so, pa;
+  var i, o, b, p, s, l, f, t, so, pa, lt;
 
   for (i=0;i<swapTrails.length;i++){
     l = swapTrails[i];
@@ -1414,16 +1832,29 @@ function draw(){
     ctx.restore();
   }
 
+  // 障礙物
   for (i=0;i<obstacles.length;i++){
     o = obstacles[i];
     var glow = o.hitGlow > 0 ? o.hitGlow : 0;
+    var lGlow = o.lightningGlow > 0 ? o.lightningGlow : 0;
 
+    // 被雷電削血中的障礙物：紫色污染
     ctx.save();
-    ctx.shadowColor = 'rgba(255,170,90,' + (0.55 + glow*0.4) + ')';
-    ctx.shadowBlur = 16 + glow*20;
+    if (lGlow > 0.1){
+      ctx.shadowColor = 'rgba(200,120,255,' + (0.6 + lGlow*0.35) + ')';
+      ctx.shadowBlur = 20 + lGlow*24;
+    } else {
+      ctx.shadowColor = 'rgba(255,170,90,' + (0.55 + glow*0.4) + ')';
+      ctx.shadowBlur = 16 + glow*20;
+    }
     var og = ctx.createRadialGradient(o.x - o.r*0.3, o.y - o.r*0.3, 0, o.x, o.y, o.r);
-    og.addColorStop(0, glow > 0.3 ? '#fff0c8' : '#ffc98a');
-    og.addColorStop(1, glow > 0.3 ? '#ff8844' : '#d9772e');
+    if (lGlow > 0.3){
+      og.addColorStop(0, '#f3e0ff');
+      og.addColorStop(1, '#a04de8');
+    } else {
+      og.addColorStop(0, glow > 0.3 ? '#fff0c8' : '#ffc98a');
+      og.addColorStop(1, glow > 0.3 ? '#ff8844' : '#d9772e');
+    }
     ctx.fillStyle = og;
     ctx.beginPath();
     ctx.arc(o.x, o.y, o.r, 0, Math.PI*2);
@@ -1432,7 +1863,7 @@ function draw(){
 
     ctx.translate(o.x, o.y);
     ctx.rotate(o.rot);
-    ctx.strokeStyle = 'rgba(255,255,255,' + (0.35 + glow*0.4) + ')';
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.35 + glow*0.4 + lGlow*0.4) + ')';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, o.r * 0.55, 0, Math.PI * 1.3);
@@ -1450,6 +1881,11 @@ function draw(){
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+
+  // ★ 雷電（在光球下方繪製，讓光球看起來在上面）
+  for (i=0;i<lightnings.length;i++){
+    drawLightning(lightnings[i]);
+  }
 
   for (i=0;i<swapOrbs.length;i++){
     so = swapOrbs[i];
@@ -1642,12 +2078,11 @@ function draw(){
 
   ctx.restore();
 
-  // 搖桿（放在最上層，但本身幾乎透明）
   drawStick();
 
   if (dangerActive && state === 'playing'){
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,120,140,' + (0.3 + Math.sin(performance.now()/120)*0.15) + ')';
+    ctx.strokeStyle = 'rgba(200,120,255,' + (0.35 + Math.sin(performance.now()/120)*0.18) + ')';
     ctx.lineWidth = 4;
     ctx.strokeRect(2, 2, W-4, H-4);
     ctx.restore();
@@ -1702,6 +2137,14 @@ function drawHUD(){
   ctx.fillStyle = 'rgba(180,215,255,0.65)';
   ctx.fillText('BEST  ' + best, 24, 70);
 
+  ctx.font = '600 12px sans-serif';
+  ctx.fillStyle = 'rgba(140,220,180,0.85)';
+  ctx.fillText('TIME  ' + elapsed.toFixed(1) + 's', 24, 88);
+
+  var rate = TIME_SCORE_BASE * (1 + elapsed / TIME_SCORE_RAMP);
+  ctx.fillStyle = 'rgba(140,220,180,0.55)';
+  ctx.fillText('+' + rate.toFixed(1) + '/s', 24, 106);
+
   ctx.textAlign = 'right';
   for (var i=0;i<MAX_HP;i++){
     var hx = W - 24 - i*30;
@@ -1718,11 +2161,11 @@ function drawHUD(){
     ctx.restore();
   }
 
-  if (swapCombo > 1 && swapComboTimer > 0){
+  if (grazeCombo > 1 && grazeComboTimer > 0){
     ctx.textAlign = 'right';
     ctx.font = '700 22px sans-serif';
-    ctx.fillStyle = 'rgba(255,220,120,' + Math.min(1, swapComboTimer/2.4 + 0.3) + ')';
-    ctx.fillText('SWAP x' + swapCombo, W - 24, 70);
+    ctx.fillStyle = 'rgba(255,220,120,' + Math.min(1, grazeComboTimer/COMBO_WINDOW + 0.3) + ')';
+    ctx.fillText('GRAZE x' + grazeCombo, W - 24, 70);
   }
 
   if (state === 'playing'){
@@ -1750,32 +2193,32 @@ function drawHUD(){
     ctx.fillStyle = '#eaf6ff';
     ctx.shadowColor = 'rgba(94,241,255,0.85)';
     ctx.shadowBlur = 22;
-    ctx.fillText('交 換 者 · 四象', W/2, H*0.11);
+    ctx.fillText('交 換 者 · 四象', W/2, H*0.10);
     ctx.shadowBlur = 0;
 
     ctx.font = '600 13px sans-serif';
     ctx.fillStyle = 'rgba(94,241,255,0.95)';
-    ctx.fillText('點左半 → 朝反重力彈跳', W/2, H*0.11 + 40);
+    ctx.fillText('點左半 → 朝反重力彈跳', W/2, H*0.10 + 40);
     ctx.fillStyle = 'rgba(255,215,107,0.95)';
-    ctx.fillText('按住右半拖曳搖桿 → 放開發射藍色交換光球', W/2, H*0.11 + 62);
+    ctx.fillText('按住右半拖曳搖桿 → 放開發射藍色交換光球', W/2, H*0.10 + 62);
     ctx.fillStyle = 'rgba(255,140,165,0.9)';
-    ctx.fillText('瞄準中點左半可取消', W/2, H*0.11 + 84);
+    ctx.fillText('瞄準中點左半可取消', W/2, H*0.10 + 84);
 
     ctx.font = '500 12px sans-serif';
+    ctx.fillStyle = 'rgba(200,120,255,0.95)';
+    ctx.fillText('★ 紫色雷電會緩緩橫掠全場，碰到立即受傷', W/2, H*0.10 + 114);
     ctx.fillStyle = 'rgba(180,215,255,0.72)';
-    ctx.fillText('藍色光球反彈牆壁，撞到障礙物才交換', W/2, H*0.11 + 112);
-    ctx.fillStyle = 'rgba(255,120,150,0.9)';
-    ctx.fillText('★ 藍色光球被敵方子彈或爆炸擊中，玩家受傷並被拖到球的位置', W/2, H*0.11 + 132);
-    ctx.fillStyle = 'rgba(180,215,255,0.72)';
-    ctx.fillText('瞄準鏡圖標預警子彈與狙擊，狙擊有旋轉限速', W/2, H*0.11 + 158);
-    ctx.fillText('驚嘆號預警炸彈，不閃爍，時間到才拋出', W/2, H*0.11 + 178);
-    ctx.fillText('子彈貼近時慢 3 倍，擦身得大量分數', W/2, H*0.11 + 198);
+    ctx.fillText('藍色光球可以穿透雷電　障礙物會被慢慢燒毀', W/2, H*0.10 + 134);
+    ctx.fillStyle = 'rgba(255,180,120,0.95)';
+    ctx.fillText('存活越久分數越高，驚險逃離可累積 Combo', W/2, H*0.10 + 158);
+    ctx.fillStyle = 'rgba(140,220,180,0.85)';
+    ctx.fillText('子彈 / 狙擊 / 炸彈 / 雷電　四種攻擊', W/2, H*0.10 + 178);
 
     var pulse = 0.55 + Math.sin(performance.now()/380)*0.45;
     ctx.globalAlpha = pulse;
     ctx.font = '700 19px sans-serif';
     ctx.fillStyle = '#5ef1ff';
-    ctx.fillText('點一下開始', W/2, H*0.86);
+    ctx.fillText('點一下開始', W/2, H*0.87);
     ctx.globalAlpha = 1;
 
   } else if (state === 'dead'){
@@ -1786,33 +2229,40 @@ function drawHUD(){
     ctx.fillStyle = '#ff6b8a';
     ctx.shadowColor = 'rgba(255,60,100,0.85)';
     ctx.shadowBlur = 22;
-    ctx.fillText('結　束', W/2, H*0.28);
+    ctx.fillText('結　束', W/2, H*0.26);
     ctx.shadowBlur = 0;
 
     ctx.font = '700 66px sans-serif';
     ctx.fillStyle = '#eaf6ff';
-    ctx.fillText(String(Math.floor(score)), W/2, H*0.38);
+    ctx.fillText(String(Math.floor(score)), W/2, H*0.36);
 
     ctx.font = '500 14px sans-serif';
     if (score >= best && score > 0){
       ctx.fillStyle = '#ffd76b';
-      ctx.fillText('★ 新紀錄 ★', W/2, H*0.48);
+      ctx.fillText('★ 新紀錄 ★', W/2, H*0.46);
     } else {
       ctx.fillStyle = 'rgba(180,215,255,0.72)';
       var diff = Math.max(0, best - Math.floor(score));
-      ctx.fillText('最高分 ' + best + '　差 ' + diff + ' 分', W/2, H*0.48);
+      ctx.fillText('最高分 ' + best + '　差 ' + diff + ' 分', W/2, H*0.46);
     }
 
-    ctx.fillStyle = 'rgba(180,215,255,0.6)';
-    ctx.font = '500 12px sans-serif';
+    ctx.fillStyle = 'rgba(140,220,180,0.9)';
+    ctx.font = '600 14px sans-serif';
     ctx.fillText('存活 ' + elapsed.toFixed(1) + ' 秒', W/2, H*0.54);
+
+    ctx.fillStyle = 'rgba(140,220,180,0.7)';
+    ctx.font = '500 12px sans-serif';
+    ctx.fillText('時間得分 ' + Math.floor(timeScore), W/2, H*0.58);
+
+    ctx.fillStyle = 'rgba(255,215,107,0.7)';
+    ctx.fillText('驚險得分 ' + Math.floor(score - timeScore), W/2, H*0.62);
 
     if (dieTimer > 0.5){
       var pulse2 = 0.55 + Math.sin(performance.now()/380)*0.45;
       ctx.globalAlpha = pulse2;
       ctx.font = '700 19px sans-serif';
       ctx.fillStyle = '#5ef1ff';
-      ctx.fillText('點一下再來一局', W/2, H*0.72);
+      ctx.fillText('點一下再來一局', W/2, H*0.76);
       ctx.globalAlpha = 1;
     }
   }
