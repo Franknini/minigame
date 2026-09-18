@@ -11,21 +11,104 @@
     touch-action:none;-webkit-user-select:none;user-select:none;
     -webkit-tap-highlight-color:transparent;overscroll-behavior:none;}
   canvas{display:block;width:100%;height:100%;cursor:crosshair;}
+  #settingsPanel{
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(5,6,20,0.92); z-index:9999; display:none;
+    overflow-y:auto; padding:20px; color:#eaf6ff;
+    font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+  }
+  #settingsPanel.show{ display:block; }
+  #settingsPanel h2{ text-align:center; margin-bottom:16px; font-size:22px; }
+  .setting-row{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:14px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.08);
+  }
+  .setting-row label{ font-size:13px; flex:0 0 45%; }
+  .setting-row input[type=range]{ flex:1; margin:0 10px; }
+  .setting-row .val{ flex:0 0 45px; text-align:right; font-size:12px; color:#ffd76b; }
+  .setting-row input[type=checkbox]{ width:18px; height:18px; }
+  #settingsPanel .btn-row{
+    display:flex; gap:10px; margin-top:20px; justify-content:center;
+  }
+  #settingsPanel button{
+    background:rgba(94,241,255,0.9); color:#000; border:none; border-radius:8px;
+    padding:10px 20px; font-weight:bold; font-size:15px; cursor:pointer;
+  }
+  #settingsPanel button.reset{ background:rgba(255,120,160,0.9); }
+  #openSettingsBtn{
+    position:fixed; top:12px; right:12px; z-index:100;
+    background:rgba(255,215,107,0.9); color:#000; border:none; border-radius:8px;
+    padding:8px 14px; font-weight:bold; font-size:14px; cursor:pointer;
+    display:none;
+  }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<button id="openSettingsBtn">⚙ 設定</button>
+
+<div id="settingsPanel">
+  <h2>⚙ 遊戲設定</h2>
+  <div id="slidersContainer"></div>
+  <div class="btn-row">
+    <button id="closeSettingsBtn">關閉</button>
+    <button id="resetSettingsBtn" class="reset">恢復預設</button>
+  </div>
+</div>
+
 <script>
 (function(){
 'use strict';
 
+/* ===================== 設定 ===================== */
+var DEFAULT_CONFIG = {
+  jumpImpulse: 420,
+  jumpCooldown: 0.35,
+  initialObstacles: 3,
+  obstacleSpawnInterval: 2.6,
+  orbSpeed: 520,
+  orbCanEatHearts: true,
+  maxHearts: 1,
+  heartSpawnInterval: 8.0,
+  gravTop: 260,
+  gravBottom: 260,
+  gravLeft: 260,
+  gravRight: 260,
+  normalBulletSpeed: 240,
+  normalBulletInterval: 2.4,
+  sniperBulletSpeed: 520,
+  sniperBulletInterval: 3.0,
+  bombSpeed: 240,
+  bombInterval: 7.0,
+  bombFuse: 2.4,
+  lightningSpeed: 82,
+  lightningInterval: 11.0
+};
+
+var CONFIG = {};
+for (var k in DEFAULT_CONFIG) CONFIG[k] = DEFAULT_CONFIG[k];
+
+try {
+  var saved = localStorage.getItem('swapper_config_v1');
+  if (saved) {
+    var parsed = JSON.parse(saved);
+    for (var k2 in parsed) {
+      if (CONFIG.hasOwnProperty(k2)) CONFIG[k2] = parsed[k2];
+    }
+  }
+} catch(e){}
+
+function saveConfig(){
+  try { localStorage.setItem('swapper_config_v1', JSON.stringify(CONFIG)); } catch(e){}
+}
+
+/* ===================== 基本環境 ===================== */
 var canvas = document.getElementById('c');
 var ctx = canvas.getContext('2d');
 var W = 0, H = 0, DPR = 1;
 var cssW = 0, cssH = 0;
 var viewOffsetX = 0, viewOffsetY = 0;
 
-// ★ 自動全螢幕（第一次點擊時觸發）
 function tryFullscreen(){
   var el = document.documentElement;
   if (el.requestFullscreen) el.requestFullscreen();
@@ -46,22 +129,15 @@ function resize(){
   cssH = window.innerHeight || document.documentElement.clientHeight || 600;
   if (cssW < 1) cssW = 800;
   if (cssH < 1) cssH = 600;
-
   canvas.width  = Math.floor(cssW * DPR);
   canvas.height = Math.floor(cssH * DPR);
   canvas.style.width  = cssW + 'px';
   canvas.style.height = cssH + 'px';
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-
   var R = 20/9;
   var vr = cssW / cssH;
-  if (vr > R){
-    H = cssH;
-    W = cssH * R;
-  } else {
-    W = cssW;
-    H = cssW / R;
-  }
+  if (vr > R){ H = cssH; W = cssH * R; }
+  else { W = cssW; H = cssW / R; }
   viewOffsetX = (cssW - W) / 2;
   viewOffsetY = (cssH - H) / 2;
 }
@@ -69,66 +145,48 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', function(){ setTimeout(resize, 150); });
 resize();
 
-/* ===================== 常數 ===================== */
+/* ===================== 常數（非設定項） ===================== */
 var PLAYER_R        = 14;
 var MAX_SPEED       = 1300;
 var WALL_BOUNCE     = 0.98;
-var GRAV_K          = 260;
-var JUMP_IMPULSE    = 420;
-var JUMP_COOLDOWN   = 0.35;
-
 var OBS_MAX         = 14;
 var OBS_MIN_R       = 14;
 var OBS_MAX_R       = 26;
 var OBS_DRAG        = 0.25;
 var OBS_WALL        = 0.95;
-var OBS_SPAWN_INT   = 2.6;
-
 var DANGER_R_NORMAL = 70;
 var DANGER_R_BOMB   = 130;
 var DANGER_EXIT     = 1.35;
-
 var GRAZE_SCORE     = 180;
 var BOMB_GRAZE_SCORE= 260;
 var MAX_HP          = 3;
 var INVULN_HIT      = 1.6;
 var INVULN_SWAP     = 0.4;
-
-var ORB_SPEED       = 520;
 var ORB_R           = 5;
 var ORB_LIFE        = 2.6;
 var ORB_WALL        = 0.95;
 var ORB_HIT_PAD     = 9;
-
 var WARN_NORMAL     = 3.0;
 var WARN_SNIPER     = 3.0;
 var WARN_BOMB       = 1.6;
 var SNIPER_AIM_SPD  = 2.1;
-
 var STICK_MAX_R     = 82;
 var STICK_MIN_MAG   = 0.15;
-
 var BOUNCE_REST_PO  = 0.85;
 var BOUNCE_REST_PB  = 0.85;
 var BOUNCE_REST_OB  = 0.70;
 var BOUNCE_FX_MIN   = 110;
-
 var COMBO_WINDOW    = 3.0;
 var TIME_SCORE_BASE = 8;
 var TIME_SCORE_RAMP = 20;
-
-var WARN_LIGHTNING       = 3.2;
-var LIGHTNING_SPEED      = 40;
-var LIGHTNING_THICK      = 10;
-var LIGHTNING_DANGER     = 90;
-var LIGHTNING_GRAZE      = 80;
-var OBS_LIGHTNING_HP     = 2.0;
-var OBS_LIGHTNING_REGEN  = 2.5;
-
-var HEART_R              = 18;
-var HEART_LIFE           = 15.0;
-var HEART_SPAWN_DELAY    = 5.0;
-var HEART_SPAWN_COOLDOWN = 8.0;
+var WARN_LIGHTNING  = 3.2;
+var LIGHTNING_THICK = 10;
+var LIGHTNING_DANGER= 90;
+var LIGHTNING_GRAZE = 80;
+var OBS_LIGHTNING_HP= 2.0;
+var OBS_LIGHTNING_REGEN = 2.5;
+var HEART_R         = 18;
+var HEART_LIFE      = 15.0;
 
 /* ===================== 狀態 ===================== */
 var state = 'ready';
@@ -144,10 +202,9 @@ var trails = [];
 var swapEchoes = [];
 var swapTrails = [];
 var floats = [];
+var hearts = [];
 
-var heartPickup = null;
-var heartSpawnTimer = HEART_SPAWN_DELAY;
-
+var heartSpawnTimer = CONFIG.heartSpawnInterval;
 var elapsed = 0;
 var score = 0;
 var timeScore = 0;
@@ -162,6 +219,7 @@ var dieTimer = 0;
 var obsSpawnTimer = 1.5;
 var bulletSpawnTimer = 2.4;
 var bombSpawnTimer = 5.5;
+var sniperSpawnTimer = 3.0;
 var lightningSpawnTimer = 10.0;
 
 var stickActive = false;
@@ -197,8 +255,7 @@ function beep(freq, dur, type, vol){
     g.gain.exponentialRampToValueAtTime(vol || 0.07, audioCtx.currentTime + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
     o.connect(g); g.connect(audioCtx.destination);
-    o.start();
-    o.stop(audioCtx.currentTime + dur + 0.02);
+    o.start(); o.stop(audioCtx.currentTime + dur + 0.02);
   } catch(e){}
 }
 function sweep(f1, f2, dur, vol){
@@ -213,8 +270,7 @@ function sweep(f1, f2, dur, vol){
     g.gain.exponentialRampToValueAtTime(vol || 0.09, audioCtx.currentTime + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
     o.connect(g); g.connect(audioCtx.destination);
-    o.start();
-    o.stop(audioCtx.currentTime + dur + 0.02);
+    o.start(); o.stop(audioCtx.currentTime + dur + 0.02);
   } catch(e){}
 }
 function lightningSfx(){
@@ -248,39 +304,26 @@ function roundRectPath(c, x, y, w, h, r){
   c.quadraticCurveTo(x, y, x+r, y);
   c.closePath();
 }
-
 function collideBodies(a, b, restitution){
-  var dx = b.x - a.x;
-  var dy = b.y - a.y;
+  var dx = b.x - a.x, dy = b.y - a.y;
   var rSum = a.r + b.r;
   var d2 = dx*dx + dy*dy;
   if (d2 >= rSum*rSum || d2 < 0.0001) return 0;
-
   var d = Math.sqrt(d2);
-  var nx = dx / d;
-  var ny = dy / d;
-
-  var ma = a.r * a.r;
-  var mb = b.r * b.r;
+  var nx = dx / d, ny = dy / d;
+  var ma = a.r * a.r, mb = b.r * b.r;
   var totalM = ma + mb;
-
   var overlap = rSum - d;
   a.x -= nx * overlap * (mb / totalM);
   a.y -= ny * overlap * (mb / totalM);
   b.x += nx * overlap * (ma / totalM);
   b.y += ny * overlap * (ma / totalM);
-
-  var rvx = b.vx - a.vx;
-  var rvy = b.vy - a.vy;
+  var rvx = b.vx - a.vx, rvy = b.vy - a.vy;
   var vn = rvx * nx + rvy * ny;
   if (vn > 0) return 0;
-
   var j = -(1 + restitution) * vn / (1/ma + 1/mb);
-  a.vx -= j * nx / ma;
-  a.vy -= j * ny / ma;
-  b.vx += j * nx / mb;
-  b.vy += j * ny / mb;
-
+  a.vx -= j * nx / ma; a.vy -= j * ny / ma;
+  b.vx += j * nx / mb; b.vy += j * ny / mb;
   return Math.abs(j);
 }
 
@@ -290,7 +333,6 @@ function reset(){
   player.y = H * 0.5;
   player.vx = (Math.random() - 0.5) * 100;
   player.vy = 0;
-
   obstacles = [];
   bullets = [];
   lightnings = [];
@@ -302,10 +344,8 @@ function reset(){
   swapEchoes = [];
   swapTrails = [];
   floats = [];
-
-  heartPickup = null;
-  heartSpawnTimer = HEART_SPAWN_DELAY;
-
+  hearts = [];
+  heartSpawnTimer = CONFIG.heartSpawnInterval;
   elapsed = 0;
   score = 0;
   timeScore = 0;
@@ -315,36 +355,32 @@ function reset(){
   shake = 0;
   flash = 0;
   dieTimer = 0;
-
   obsSpawnTimer = 1.2;
   bulletSpawnTimer = 2.4;
   bombSpawnTimer = 5.5;
+  sniperSpawnTimer = 3.0;
   lightningSpawnTimer = 9.0;
-
   stickActive = false;
   stickPointerId = null;
   stickMag = 0;
-
   grazeCombo = 0;
   grazeComboTimer = 0;
   dangerActive = false;
-
-  for (var i=0;i<3;i++) spawnObstacle(true);
+  var initObs = Math.max(0, Math.floor(CONFIG.initialObstacles));
+  for (var i=0;i<initObs;i++) spawnObstacle(true);
 }
 
 function difficulty(){ return Math.min(1, elapsed / 75); }
 
-/* ===================== 四邊吸引重力 ===================== */
+/* ===================== 四邊重力場 ===================== */
 function gravityAt(x, y){
-  var halfW = W * 0.5;
-  var halfH = H * 0.5;
+  var halfW = W * 0.5, halfH = H * 0.5;
   var lp = Math.max(0, 1 - x / halfW);
   var rp = Math.max(0, 1 - (W - x) / halfW);
   var tp = Math.max(0, 1 - y / halfH);
   var bp = Math.max(0, 1 - (H - y) / halfH);
-
-  var fx = -GRAV_K * (lp*lp - rp*rp);
-  var fy = -GRAV_K * (tp*tp - bp*bp);
+  var fx = -CONFIG.gravLeft * lp * lp + CONFIG.gravRight * rp * rp;
+  var fy = -CONFIG.gravTop * tp * tp + CONFIG.gravBottom * bp * bp;
   return { x: fx, y: fy };
 }
 
@@ -358,31 +394,24 @@ function spawnObstacle(inside){
   else if (side === 1){ x = Math.random()*W; y = H+m; }
   else if (side === 2){ x = -m; y = Math.random()*H; }
   else { x = W+m; y = Math.random()*H; }
-
   if (inside){
     x = W * (0.15 + Math.random()*0.7);
     y = H * (0.15 + Math.random()*0.7);
   }
-
   var tx = W * (0.2 + Math.random()*0.6);
   var ty = H * (0.2 + Math.random()*0.6);
   var dx = tx - x, dy = ty - y;
   var len = Math.hypot(dx, dy) || 1;
-
   var sp = inside ? (30 + Math.random()*50) : (140 + Math.random()*140);
   var r = OBS_MIN_R + Math.random()*(OBS_MAX_R - OBS_MIN_R);
-
   obstacles.push({
     x: x, y: y,
-    vx: (dx/len)*sp,
-    vy: (dy/len)*sp,
+    vx: (dx/len)*sp, vy: (dy/len)*sp,
     r: r,
     rot: Math.random()*Math.PI*2,
     rotV: (Math.random()-0.5)*3,
-    hitGlow: 0,
-    inside: false,
-    lightningExposure: 0,
-    lightningGlow: 0
+    hitGlow: 0, inside: false,
+    lightningExposure: 0, lightningGlow: 0
   });
 }
 
@@ -395,19 +424,14 @@ function queueAttack(type){
     else if (lside === 1){ ix = W*0.5; iy = H; }
     else if (lside === 2){ ix = 0; iy = H*0.5; }
     else { ix = W; iy = H*0.5; }
-
     pending.push({
-      type: 'lightning',
-      side: lside,
-      iconX: ix,
-      iconY: iy,
-      timer: WARN_LIGHTNING,
-      totalTime: WARN_LIGHTNING,
+      type: 'lightning', side: lside,
+      iconX: ix, iconY: iy,
+      timer: WARN_LIGHTNING, totalTime: WARN_LIGHTNING,
       aimAngle: 0
     });
     return;
   }
-
   var side = Math.floor(Math.random()*4);
   var margin = 70;
   var ix2, iy2;
@@ -415,125 +439,73 @@ function queueAttack(type){
   else if (side === 1){ ix2 = margin + Math.random()*(W-margin*2); iy2 = H; }
   else if (side === 2){ ix2 = 0; iy2 = margin + Math.random()*(H-margin*2); }
   else { ix2 = W; iy2 = margin + Math.random()*(H-margin*2); }
-
   var totalTime = (type === 'bomb') ? WARN_BOMB : (type === 'sniper' ? WARN_SNIPER : WARN_NORMAL);
-
   var p = {
-    type: type,
-    side: side,
-    iconX: ix2,
-    iconY: iy2,
-    timer: totalTime,
-    totalTime: totalTime,
+    type: type, side: side,
+    iconX: ix2, iconY: iy2,
+    timer: totalTime, totalTime: totalTime,
     aimAngle: 0
   };
-
   if (type === 'normal' || type === 'sniper'){
     p.aimAngle = Math.atan2(player.y - iy2, player.x - ix2);
   }
-
   pending.push(p);
 }
 
 /* ===================== 生成雷電 ===================== */
 function spawnLightning(lside){
   var l = {
-    type: 'lightning',
-    side: lside,
+    type: 'lightning', side: lside,
     horizontal: (lside === 0 || lside === 1),
-    pos: 0,
-    vel: 0,
+    pos: 0, vel: 0,
     thickness: LIGHTNING_THICK,
     dangerPhase: 'none',
     jitterSeed: Math.random()*1000,
     spawnTime: 0
   };
-  if (lside === 0){ l.pos = -30; l.vel =  LIGHTNING_SPEED; }
-  if (lside === 1){ l.pos = H+30; l.vel = -LIGHTNING_SPEED; }
-  if (lside === 2){ l.pos = -30; l.vel =  LIGHTNING_SPEED; }
-  if (lside === 3){ l.pos = W+30; l.vel = -LIGHTNING_SPEED; }
+  if (lside === 0){ l.pos = -30; l.vel =  CONFIG.lightningSpeed; }
+  if (lside === 1){ l.pos = H+30; l.vel = -CONFIG.lightningSpeed; }
+  if (lside === 2){ l.pos = -30; l.vel =  CONFIG.lightningSpeed; }
+  if (lside === 3){ l.pos = W+30; l.vel = -CONFIG.lightningSpeed; }
   lightnings.push(l);
-
   lightningSfx();
   shake = Math.min(18, shake + 8);
-
-  if (l.horizontal){
-    for (var i=0;i<14;i++){
-      particles.push({
-        x: Math.random()*W,
-        y: l.side === 0 ? 0 : H,
-        vx: (Math.random()-0.5)*80,
-        vy: (l.side === 0 ? 1 : -1) * (60 + Math.random()*120),
-        life: 0.5 + Math.random()*0.4, maxLife: 0.9,
-        color: '190,110,255', r: 1.5 + Math.random()*2.2
-      });
-    }
-  } else {
-    for (var j=0;j<14;j++){
-      particles.push({
-        x: l.side === 2 ? 0 : W,
-        y: Math.random()*H,
-        vx: (l.side === 2 ? 1 : -1) * (60 + Math.random()*120),
-        vy: (Math.random()-0.5)*80,
-        life: 0.5 + Math.random()*0.4, maxLife: 0.9,
-        color: '190,110,255', r: 1.5 + Math.random()*2.2
-      });
-    }
-  }
 }
 
 /* ===================== 發射 ===================== */
 function fireBullet(x, y, angle, type){
   var speed, r;
-  if (type === 'sniper'){ speed = 520 + Math.random()*220 + difficulty()*180; r = 4; }
-  else { speed = 240 + Math.random()*160 + difficulty()*120; r = 7; }
-
+  if (type === 'sniper'){ speed = CONFIG.sniperBulletSpeed + Math.random()*80 + difficulty()*80; r = 4; }
+  else { speed = CONFIG.normalBulletSpeed + Math.random()*80 + difficulty()*60; r = 7; }
   var b = {
-    type: type,
-    x: x, y: y,
-    vx: Math.cos(angle)*speed,
-    vy: Math.sin(angle)*speed,
-    r: r,
-    life: 12,
-    inDanger: false,
-    wasInDanger: false,
-    hitPlayer: false,
-    safe: false
+    type: type, x: x, y: y,
+    vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
+    r: r, life: 12,
+    inDanger: false, wasInDanger: false,
+    hitPlayer: false, safe: false
   };
-
   var pd = Math.hypot(b.x - player.x, b.y - player.y);
   if (pd < 130) b.safe = true;
-
   bullets.push(b);
 }
-
 function fireBomb(x, y, side){
   var ang;
   if (side === 0) ang = Math.PI/2 + (Math.random()-0.5)*1.1;
   else if (side === 1) ang = -Math.PI/2 + (Math.random()-0.5)*1.1;
   else if (side === 2) ang = (Math.random()-0.5)*1.1;
   else ang = Math.PI + (Math.random()-0.5)*1.1;
-
-  var speed = 240 + Math.random()*180;
-
+  var speed = CONFIG.bombSpeed + Math.random()*80;
   var b = {
-    type: 'bomb',
-    x: x, y: y,
-    vx: Math.cos(ang)*speed,
-    vy: Math.sin(ang)*speed,
-    r: 13,
-    life: 14,
-    fuse: 2.4 + Math.random()*1.6,
+    type: 'bomb', x: x, y: y,
+    vx: Math.cos(ang)*speed, vy: Math.sin(ang)*speed,
+    r: 13, life: 14,
+    fuse: CONFIG.bombFuse + Math.random()*0.5,
     bombGrav: 340,
-    inDanger: false,
-    wasInDanger: false,
-    hitPlayer: false,
-    safe: false
+    inDanger: false, wasInDanger: false,
+    hitPlayer: false, safe: false
   };
-
   var pd = Math.hypot(b.x - player.x, b.y - player.y);
   if (pd < 150) b.safe = true;
-
   bullets.push(b);
 }
 
@@ -544,12 +516,9 @@ function spawnBurst(x, y, color, n, mul){
     var sp = (60 + Math.random()*300) * (mul || 1);
     particles.push({
       x:x, y:y,
-      vx: Math.cos(a)*sp,
-      vy: Math.sin(a)*sp,
-      life: 0.35 + Math.random()*0.5,
-      maxLife: 0.85,
-      color: color,
-      r: 1.5 + Math.random()*2.6
+      vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+      life: 0.35 + Math.random()*0.5, maxLife: 0.85,
+      color: color, r: 1.5 + Math.random()*2.6
     });
   }
 }
@@ -560,49 +529,34 @@ function showFloat(x, y, text, color){
   floats.push({ x:x, y:y, text:text, color:color, life:1.1, maxLife:1.1 });
 }
 
-/* ===================== 受傷處理 ===================== */
+/* ===================== 受傷 ===================== */
 function takeDamage(){
   hp--;
   invuln = INVULN_HIT;
   shake = Math.min(34, shake + 24);
   flash = 1;
-
   grazeCombo = 0;
   grazeComboTimer = 0;
-
-  if (hp > 0 && hp < MAX_HP && heartPickup === null){
-    heartSpawnTimer = HEART_SPAWN_DELAY;
-  }
-
   if (hp <= 0) die();
 }
 
 /* ===================== 交換光球被擊中 ===================== */
 function applyOrbDamage(so){
   var ox = so.x, oy = so.y;
-
   spawnBurst(ox, oy, '255,80,100', 24, 1.5);
   spawnBurst(ox, oy, '94,200,255', 18, 1.3);
   spawnRing(ox, oy, '255,80,100', 90);
   spawnRing(ox, oy, '255,255,255', 55);
-
   if (invuln > 0) return;
-
   swapTrails.push({ x1:player.x, y1:player.y, x2:ox, y2:oy, life:0.48, maxLife:0.48, color:'255,80,100' });
   swapEchoes.push({ x:player.x, y:player.y, r:player.r, life:0.6, maxLife:0.6, color:'255,80,100' });
   swapEchoes.push({ x:ox, y:oy, r:player.r, life:0.6, maxLife:0.6, color:'255,80,100' });
-  swapEchoes.push({ x:ox, y:oy, r:player.r*0.6, life:0.75, maxLife:0.75, color:'255,255,255' });
-
-  player.x = ox;
-  player.y = oy;
-  player.vx *= 0.3;
-  player.vy *= 0.3;
-
+  player.x = ox; player.y = oy;
+  player.vx *= 0.3; player.vy *= 0.3;
   spawnRing(player.x, player.y, '255,80,80', 100);
   showFloat(player.x, player.y - 44, '光球被擊中！', '#ff6b8a');
   beep(120, 0.32, 'sawtooth', 0.16);
   setTimeout(function(){ beep(70, 0.35, 'sine', 0.12); }, 90);
-
   takeDamage();
 }
 
@@ -610,17 +564,14 @@ function applyOrbDamage(so){
 function doJump(){
   if (state !== 'playing') return;
   if (jumpCd > 0) return;
-  jumpCd = JUMP_COOLDOWN;
-
+  jumpCd = CONFIG.jumpCooldown;
   var g = gravityAt(player.x, player.y);
   var gm = Math.hypot(g.x, g.y);
   var ux, uy;
   if (gm < 8){ ux = 0; uy = -1; }
   else { ux = -g.x / gm; uy = -g.y / gm; }
-
-  player.vx += ux * JUMP_IMPULSE;
-  player.vy += uy * JUMP_IMPULSE;
-
+  player.vx += ux * CONFIG.jumpImpulse;
+  player.vy += uy * CONFIG.jumpImpulse;
   for (var i=0;i<12;i++){
     var a = Math.atan2(uy, ux) + (Math.random()-0.5)*1.1;
     var sp = 100 + Math.random()*200;
@@ -636,7 +587,6 @@ function doJump(){
   beep(720, 0.07, 'sine', 0.08);
 }
 
-// ★ 左半螢幕的共用行為（點擊左半邊或按空白鍵都會呼叫）
 function handleLeftAction(){
   if (state === 'ready' || state === 'dead'){
     if (state === 'dead' && dieTimer < 0.5) return;
@@ -645,8 +595,6 @@ function handleLeftAction(){
     return;
   }
   if (state !== 'playing') return;
-
-  // 如果正在瞄準，取消瞄準（不觸發彈跳）
   if (stickActive){
     stickActive = false;
     stickPointerId = null;
@@ -659,12 +607,13 @@ function handleLeftAction(){
 
 function fireSwapOrb(angle){
   if (state !== 'playing') return;
+  var playerSpeed = Math.hypot(player.vx, player.vy);
+  var speed = CONFIG.orbSpeed + playerSpeed * 0.8;
   swapOrbs.push({
     x: player.x, y: player.y,
-    vx: Math.cos(angle) * ORB_SPEED,
-    vy: Math.sin(angle) * ORB_SPEED,
-    r: ORB_R,
-    life: ORB_LIFE,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    r: ORB_R, life: ORB_LIFE,
     trail: []
   });
   spawnBurst(player.x, player.y, '94,200,255', 8, 0.9);
@@ -675,34 +624,25 @@ function fireSwapOrb(angle){
 
 function doSwapWith(o){
   if (state !== 'playing' || !o) return;
-
   var px = player.x, py = player.y;
   var pvx = player.vx, pvy = player.vy;
   var ox = o.x, oy = o.y;
   var ovx = o.vx, ovy = o.vy;
-
   swapTrails.push({ x1:px, y1:py, x2:ox, y2:oy, life:0.42, maxLife:0.42, color:'94,241,255' });
   swapEchoes.push({ x:px, y:py, r:player.r, life:0.55, maxLife:0.55, color:'94,241,255' });
   swapEchoes.push({ x:ox, y:oy, r:o.r,     life:0.55, maxLife:0.55, color:'255,160,90' });
-  swapEchoes.push({ x:px, y:py, r:player.r*0.7, life:0.7, maxLife:0.7, color:'255,255,255' });
-  swapEchoes.push({ x:ox, y:oy, r:o.r*0.7,     life:0.7, maxLife:0.7, color:'255,255,255' });
-
   player.x = ox; player.y = oy;
   player.vx = ovx; player.vy = ovy;
   o.x = px; o.y = py;
   o.vx = pvx; o.vy = pvy;
   o.hitGlow = 0.7;
-
   spawnBurst(px, py, '94,241,255', 18, 1.2);
   spawnBurst(ox, oy, '255,160,90', 18, 1.2);
   spawnRing(px, py, '94,241,255', 80);
   spawnRing(ox, oy, '255,160,90', 80);
-  spawnRing(ox, oy, '255,255,255', 50);
-
   shake = Math.min(20, shake + 14);
   flash = Math.min(1, flash + 0.55);
   invuln = Math.max(invuln, INVULN_SWAP);
-
   sweep(420, 1300, 0.16, 0.11);
 }
 
@@ -710,16 +650,6 @@ function breakObstacle(o){
   spawnBurst(o.x, o.y, '255,180,120', 18, 1.2);
   spawnBurst(o.x, o.y, '255,120,90', 12, 0.9);
   spawnRing(o.x, o.y, '255,180,120', 60);
-  for (var i=0;i<8;i++){
-    var a = Math.random()*Math.PI*2;
-    var sp = 80 + Math.random()*180;
-    particles.push({
-      x:o.x, y:o.y,
-      vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
-      life:0.5 + Math.random()*0.4, maxLife:0.9,
-      color:'255,200,150', r:2 + Math.random()*2
-    });
-  }
   beep(280, 0.12, 'triangle', 0.08);
 }
 
@@ -731,11 +661,9 @@ function getLocalXY(e){
     y: e.clientY - rect.top  - viewOffsetY
   };
 }
-
 function onPointerDown(e){
   if (e && e.cancelable) e.preventDefault();
   initAudio();
-
   if (state === 'ready' || state === 'dead'){
     if (state === 'dead' && dieTimer < 0.5) return;
     state = 'playing';
@@ -743,72 +671,51 @@ function onPointerDown(e){
     return;
   }
   if (state !== 'playing') return;
-
   var p = getLocalXY(e);
   var cx = p.x, cy = p.y;
-
   if (cx < W * 0.5){
-    // ★ 左半邊：直接呼叫共用函式
     handleLeftAction();
   } else {
     if (stickPointerId === null){
       stickPointerId = (e.pointerId !== undefined) ? e.pointerId : 1;
       stickActive = true;
-      stickCx = cx;
-      stickCy = cy;
-      stickX = cx;
-      stickY = cy;
-      stickAngle = 0;
-      stickMag = 0;
+      stickCx = cx; stickCy = cy;
+      stickX = cx; stickY = cy;
+      stickAngle = 0; stickMag = 0;
     }
   }
 }
-
 function onPointerMove(e){
   if (!stickActive) return;
   var pid = (e.pointerId !== undefined) ? e.pointerId : 1;
   if (pid !== stickPointerId) return;
-
   var p = getLocalXY(e);
   var cx = p.x, cy = p.y;
-
-  var dx = cx - stickCx;
-  var dy = cy - stickCy;
+  var dx = cx - stickCx, dy = cy - stickCy;
   var d = Math.hypot(dx, dy);
   if (d > STICK_MAX_R){
     cx = stickCx + dx/d * STICK_MAX_R;
     cy = stickCy + dy/d * STICK_MAX_R;
     d = STICK_MAX_R;
   }
-  stickX = cx;
-  stickY = cy;
-
-  if (d > 4){
-    stickAngle = Math.atan2(dy, dx);
-  }
+  stickX = cx; stickY = cy;
+  if (d > 4) stickAngle = Math.atan2(dy, dx);
   stickMag = Math.min(1, d / STICK_MAX_R);
 }
-
 function onPointerUp(e){
   if (e && e.cancelable) e.preventDefault();
   var pid = (e.pointerId !== undefined) ? e.pointerId : 1;
   if (pid !== stickPointerId) return;
   stickPointerId = null;
-
-  if (stickActive && stickMag > STICK_MIN_MAG){
-    fireSwapOrb(stickAngle);
-  }
-  stickActive = false;
-  stickMag = 0;
+  if (stickActive && stickMag > STICK_MIN_MAG) fireSwapOrb(stickAngle);
+  stickActive = false; stickMag = 0;
 }
-
 function onPointerCancel(e){
   var pid = (e && e.pointerId !== undefined) ? e.pointerId : 1;
   if (pid === stickPointerId){
     stickPointerId = null; stickActive = false; stickMag = 0;
   }
 }
-
 canvas.addEventListener('pointerdown', onPointerDown);
 canvas.addEventListener('pointermove', onPointerMove);
 canvas.addEventListener('pointerup', onPointerUp);
@@ -816,7 +723,6 @@ canvas.addEventListener('pointercancel', onPointerCancel);
 canvas.addEventListener('touchstart', function(e){ e.preventDefault(); }, {passive:false});
 canvas.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 
-// ★ 鍵盤：空白鍵 / Enter / W / ↑ 都等於點擊左半螢幕
 window.addEventListener('keydown', function(e){
   if (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowUp' || e.code === 'KeyW'){
     if (e.cancelable) e.preventDefault();
@@ -830,7 +736,6 @@ function update(rawDt){
   var dt = rawDt;
   if (dt > 0.05) dt = 0.05;
   if (dt < 0) dt = 0;
-
   dangerActive = false;
   for (var i=0;i<bullets.length;i++){
     if (bullets[i].inDanger && !bullets[i].safe){ dangerActive = true; break; }
@@ -840,23 +745,18 @@ function update(rawDt){
       if (lightnings[i].dangerPhase === 'inDanger'){ dangerActive = true; break; }
     }
   }
-
   var timeScale = 1;
   if (dangerActive) timeScale = 1/3;
   else if (stickActive) timeScale = 1/10;
-
   var sdt = dt * timeScale;
   var vdt = dt;
-
   if (shake > 0) shake = Math.max(0, shake - vdt*44);
   if (flash > 0) flash = Math.max(0, flash - vdt*3.2);
-
   for (i=particles.length-1;i>=0;i--){
     var p = particles[i];
     p.life -= vdt;
     if (p.life <= 0){ particles.splice(i,1); continue; }
-    p.x += p.vx * vdt;
-    p.y += p.vy * vdt;
+    p.x += p.vx * vdt; p.y += p.vy * vdt;
     var damp = 1 - vdt*3;
     p.vx *= damp; p.vy *= damp;
   }
@@ -876,108 +776,76 @@ function update(rawDt){
   }
   for (i=floats.length-1;i>=0;i--){
     var f = floats[i];
-    f.life -= vdt;
-    f.y -= vdt * 40;
+    f.life -= vdt; f.y -= vdt * 40;
     if (f.life <= 0) floats.splice(i,1);
   }
   for (i=trails.length-1;i>=0;i--){
     trails[i].life -= vdt;
     if (trails[i].life <= 0) trails.splice(i,1);
   }
-
   if (state === 'dead'){ dieTimer += vdt; return; }
   if (state !== 'playing') return;
-
   elapsed += sdt;
-
   var timeMul = 1 + elapsed / TIME_SCORE_RAMP;
   var gain = sdt * TIME_SCORE_BASE * timeMul;
-  score += gain;
-  timeScore += gain;
-
+  score += gain; timeScore += gain;
   if (invuln > 0) invuln -= sdt;
   if (jumpCd > 0) jumpCd -= sdt;
-
   if (grazeComboTimer > 0){
     grazeComboTimer -= sdt;
     if (grazeComboTimer <= 0) grazeCombo = 0;
   }
-
-  /* ---- 玩家物理 ---- */
+  // 玩家物理
   var g = gravityAt(player.x, player.y);
   player.vx += g.x * sdt;
   player.vy += g.y * sdt;
-
   var sp = Math.hypot(player.vx, player.vy);
   if (sp > MAX_SPEED){
     player.vx = player.vx / sp * MAX_SPEED;
     player.vy = player.vy / sp * MAX_SPEED;
   }
-
   player.x += player.vx * sdt;
   player.y += player.vy * sdt;
-
   var m = player.r;
   if (player.x < m){ player.x = m; player.vx = Math.abs(player.vx)*WALL_BOUNCE; }
   if (player.x > W-m){ player.x = W-m; player.vx = -Math.abs(player.vx)*WALL_BOUNCE; }
   if (player.y < m){ player.y = m; player.vy = Math.abs(player.vy)*WALL_BOUNCE; }
   if (player.y > H-m){ player.y = H-m; player.vy = -Math.abs(player.vy)*WALL_BOUNCE; }
-
   trails.push({ x:player.x, y:player.y, life:0.3, maxLife:0.3 });
   if (trails.length > 26) trails.shift();
 
-  /* ---- ★ 愛心生成與碰撞 ---- */
-  if (hp < MAX_HP && heartPickup === null){
+  // 愛心生成
+  if (hp < MAX_HP && hearts.length < CONFIG.maxHearts){
     heartSpawnTimer -= sdt;
     if (heartSpawnTimer <= 0){
       var hx = 70 + Math.random() * (W - 140);
       var hy = 70 + Math.random() * (H - 140);
-      heartPickup = {
-        x: hx, y: hy,
-        r: HEART_R,
-        life: HEART_LIFE,
-        spawnTime: 0
-      };
-      heartSpawnTimer = HEART_SPAWN_COOLDOWN;
+      hearts.push({ x: hx, y: hy, r: HEART_R, life: HEART_LIFE });
+      heartSpawnTimer = CONFIG.heartSpawnInterval;
       spawnRing(hx, hy, '255,120,160', 50);
       beep(880, 0.12, 'sine', 0.06);
     }
   }
-
-  if (heartPickup){
-    heartPickup.life -= sdt;
-    heartPickup.spawnTime += sdt;
-
-    if (hp >= MAX_HP || heartPickup.life <= 0){
-      if (heartPickup.life <= 0){
-        spawnBurst(heartPickup.x, heartPickup.y, '255,120,160', 8, 0.6);
-      }
-      heartPickup = null;
-    } else {
-      var hdx = player.x - heartPickup.x;
-      var hdy = player.y - heartPickup.y;
-      var hr = player.r + heartPickup.r;
-      if (hdx*hdx + hdy*hdy < hr*hr){
-        hp = Math.min(hp + 1, MAX_HP);
-        spawnBurst(heartPickup.x, heartPickup.y, '255,120,160', 20, 1.3);
-        spawnBurst(heartPickup.x, heartPickup.y, '255,255,255', 10, 1.0);
-        spawnRing(heartPickup.x, heartPickup.y, '255,120,160', 90);
-        showFloat(heartPickup.x, heartPickup.y - 30, '+1 HP', '#ff6b8a');
-        heartPickupSfx();
-        heartPickup = null;
-
-        if (hp < MAX_HP){
-          heartSpawnTimer = HEART_SPAWN_DELAY;
-        }
-      }
+  // 愛心更新
+  for (i=hearts.length-1;i>=0;i--){
+    var h = hearts[i];
+    h.life -= sdt;
+    if (h.life <= 0){ hearts.splice(i,1); continue; }
+    var hdx = player.x - h.x, hdy = player.y - h.y;
+    var hr = player.r + h.r;
+    if (hdx*hdx + hdy*hdy < hr*hr){
+      hp = Math.min(hp + 1, MAX_HP);
+      spawnBurst(h.x, h.y, '255,120,160', 20, 1.3);
+      spawnRing(h.x, h.y, '255,120,160', 90);
+      showFloat(h.x, h.y - 30, '+1 HP', '#ff6b8a');
+      heartPickupSfx();
+      hearts.splice(i,1);
     }
   }
-
-  /* ---- 預警更新 ---- */
+  // 預警更新
   for (i=pending.length-1;i>=0;i--){
     var pa = pending[i];
     pa.timer -= sdt;
-
     if (pa.type === 'sniper'){
       var tAngle = Math.atan2(player.y - pa.iconY, player.x - pa.iconX);
       var diff = normalizeAngle(tAngle - pa.aimAngle);
@@ -985,7 +853,6 @@ function update(rawDt){
       if (Math.abs(diff) < maxRot) pa.aimAngle = tAngle;
       else pa.aimAngle += (diff > 0 ? 1 : -1) * maxRot;
     }
-
     if (pa.timer <= 0){
       if (pa.type === 'normal') fireBullet(pa.iconX, pa.iconY, pa.aimAngle, 'normal');
       else if (pa.type === 'sniper') fireBullet(pa.iconX, pa.iconY, pa.aimAngle, 'sniper');
@@ -994,172 +861,113 @@ function update(rawDt){
       pending.splice(i, 1);
     }
   }
-
-  /* ---- 生成障礙物 ---- */
+  // 生成障礙物
   obsSpawnTimer -= sdt;
   if (obsSpawnTimer <= 0){
     spawnObstacle(false);
-    obsSpawnTimer = OBS_SPAWN_INT + Math.random()*0.9;
+    obsSpawnTimer = Math.max(0.1, CONFIG.obstacleSpawnInterval) + Math.random()*0.5;
   }
-
-  /* ---- 障礙物更新 ---- */
+  // 障礙物更新
   for (i=obstacles.length-1;i>=0;i--){
     var o = obstacles[i];
     var dr = Math.exp(-OBS_DRAG * sdt);
     o.vx *= dr; o.vy *= dr;
-    o.x += o.vx * sdt;
-    o.y += o.vy * sdt;
+    o.x += o.vx * sdt; o.y += o.vy * sdt;
     o.rot += o.rotV * sdt;
     if (o.hitGlow > 0) o.hitGlow -= vdt * 1.6;
-
     if (o.lightningExposure > 0){
       o.lightningExposure -= OBS_LIGHTNING_REGEN * sdt;
       if (o.lightningExposure < 0) o.lightningExposure = 0;
     }
     if (o.lightningGlow > 0) o.lightningGlow -= vdt * 2.5;
     if (o.lightningGlow < 0) o.lightningGlow = 0;
-
     if (!o.inside && o.x > 0 && o.x < W && o.y > 0 && o.y < H) o.inside = true;
-
     if (o.inside){
       if (o.x < o.r){ o.x = o.r; o.vx = Math.abs(o.vx)*OBS_WALL; }
       if (o.x > W-o.r){ o.x = W-o.r; o.vx = -Math.abs(o.vx)*OBS_WALL; }
       if (o.y < o.r){ o.y = o.r; o.vy = Math.abs(o.vy)*OBS_WALL; }
       if (o.y > H-o.r){ o.y = H-o.r; o.vy = -Math.abs(o.vy)*OBS_WALL; }
     }
-
     if (o.x < -200 || o.x > W+200 || o.y < -200 || o.y > H+200){
       if (Math.hypot(o.vx, o.vy) > 20 && !o.inside){
         obstacles.splice(i,1); continue;
       }
     }
   }
-
-  /* ---- 生成攻擊 ---- */
+  // 生成攻擊
   bulletSpawnTimer -= sdt;
   if (bulletSpawnTimer <= 0){
-    var d = difficulty();
-    var isSniper = Math.random() < (0.3 + d*0.3);
-    queueAttack(isSniper ? 'sniper' : 'normal');
-    if (d > 0.4 && Math.random() < 0.35 + d*0.3) queueAttack(Math.random()<0.5?'sniper':'normal');
-    if (d > 0.7 && Math.random() < 0.35) queueAttack(Math.random()<0.5?'sniper':'normal');
-    bulletSpawnTimer = (2.4 - d*1.6) + Math.random()*(0.9 - d*0.4);
-    if (bulletSpawnTimer < 0.35) bulletSpawnTimer = 0.35;
+    queueAttack('normal');
+    bulletSpawnTimer = Math.max(0.1, CONFIG.normalBulletInterval) + Math.random()*0.5;
   }
-
+  sniperSpawnTimer -= sdt;
+  if (sniperSpawnTimer <= 0){
+    queueAttack('sniper');
+    sniperSpawnTimer = Math.max(0.1, CONFIG.sniperBulletInterval) + Math.random()*0.5;
+  }
   bombSpawnTimer -= sdt;
   if (bombSpawnTimer <= 0){
     queueAttack('bomb');
-    var d2 = difficulty();
-    if (d2 > 0.5 && Math.random() < 0.4) queueAttack('bomb');
-    if (d2 > 0.8 && Math.random() < 0.35) queueAttack('bomb');
-    bombSpawnTimer = (7.0 - d2*4.5) + Math.random()*2.0;
-    if (bombSpawnTimer < 1.8) bombSpawnTimer = 1.8;
+    bombSpawnTimer = Math.max(0.5, CONFIG.bombInterval) + Math.random()*1.0;
   }
-
   lightningSpawnTimer -= sdt;
   if (lightningSpawnTimer <= 0){
     queueAttack('lightning');
-    var d3 = difficulty();
-    if (d3 > 0.7 && Math.random() < 0.3) queueAttack('lightning');
-    lightningSpawnTimer = (11.0 - d3*5.0) + Math.random()*4.0;
-    if (lightningSpawnTimer < 5.5) lightningSpawnTimer = 5.5;
+    lightningSpawnTimer = Math.max(1.0, CONFIG.lightningInterval) + Math.random()*2.0;
   }
-
-  /* ==================================================
-     雷電更新
-     ================================================== */
+  // 雷電更新
   for (i=lightnings.length-1;i>=0;i--){
     var lt = lightnings[i];
     lt.pos += lt.vel * sdt;
     lt.spawnTime += sdt;
-
     var out = false;
-    if (lt.horizontal){
-      if (lt.pos < -100 || lt.pos > H + 100) out = true;
-    } else {
-      if (lt.pos < -100 || lt.pos > W + 100) out = true;
-    }
-    if (out){
-      lightnings.splice(i, 1);
-      continue;
-    }
-
+    if (lt.horizontal){ if (lt.pos < -100 || lt.pos > H + 100) out = true; }
+    else { if (lt.pos < -100 || lt.pos > W + 100) out = true; }
+    if (out){ lightnings.splice(i, 1); continue; }
     if (Math.random() < 0.7){
       var sparkX, sparkY;
-      if (lt.horizontal){
-        sparkX = Math.random()*W;
-        sparkY = lt.pos + (Math.random()-0.5)*lt.thickness*3;
-      } else {
-        sparkX = lt.pos + (Math.random()-0.5)*lt.thickness*3;
-        sparkY = Math.random()*H;
-      }
+      if (lt.horizontal){ sparkX = Math.random()*W; sparkY = lt.pos + (Math.random()-0.5)*lt.thickness*3; }
+      else { sparkX = lt.pos + (Math.random()-0.5)*lt.thickness*3; sparkY = Math.random()*H; }
       particles.push({
         x: sparkX, y: sparkY,
-        vx: (Math.random()-0.5)*120,
-        vy: (Math.random()-0.5)*120,
+        vx: (Math.random()-0.5)*120, vy: (Math.random()-0.5)*120,
         life: 0.25 + Math.random()*0.35, maxLife: 0.6,
         color: '200,130,255', r: 1 + Math.random()*1.8
       });
     }
-
     var distToPlayer;
     if (lt.horizontal) distToPlayer = Math.abs(player.y - lt.pos);
     else distToPlayer = Math.abs(player.x - lt.pos);
-
     var hitRange = player.r + lt.thickness * 0.5 + 4;
-
     if (distToPlayer < hitRange && invuln <= 0){
       spawnBurst(player.x, player.y, '190,110,255', 30, 1.6);
-      spawnBurst(player.x, player.y, '255,255,255', 14, 1.2);
       spawnRing(player.x, player.y, '190,110,255', 110);
-      shake = Math.min(36, shake + 26);
-      flash = 1;
+      shake = Math.min(36, shake + 26); flash = 1;
       beep(90, 0.42, 'sawtooth', 0.18);
-      setTimeout(function(){ beep(60, 0.5, 'sawtooth', 0.14); }, 120);
       lt.dangerPhase = 'none';
       takeDamage();
       if (state !== 'playing') return;
     }
-
     if (distToPlayer < LIGHTNING_DANGER){
-      if (lt.dangerPhase !== 'inDanger'){
-        lt.dangerPhase = 'inDanger';
-      }
+      if (lt.dangerPhase !== 'inDanger') lt.dangerPhase = 'inDanger';
     } else if (lt.dangerPhase === 'inDanger' && distToPlayer > LIGHTNING_DANGER * 1.4){
       if (invuln <= 0){
         var lPts = LIGHTNING_GRAZE * Math.min(1 + grazeCombo * 0.4, 4);
-        lPts = Math.floor(lPts);
-        score += lPts;
-        grazeCombo++;
+        score += Math.floor(lPts); grazeCombo++;
         grazeComboTimer = COMBO_WINDOW;
-        showFloat(player.x, player.y - 42, '+' + lPts + ' 雷電 x' + grazeCombo, '#c07bff');
+        showFloat(player.x, player.y - 42, '+' + Math.floor(lPts) + ' 雷電 x' + grazeCombo, '#c07bff');
         beep(1050, 0.12, 'triangle', 0.08);
       }
       lt.dangerPhase = 'none';
     }
-
     for (var oi2 = obstacles.length-1; oi2 >= 0; oi2--){
       var oo3 = obstacles[oi2];
       var distToObs;
       if (lt.horizontal) distToObs = Math.abs(oo3.y - lt.pos);
       else distToObs = Math.abs(oo3.x - lt.pos);
-
       if (distToObs < oo3.r + lt.thickness * 0.5){
         oo3.lightningExposure += sdt;
         oo3.lightningGlow = 1;
-
-        if (Math.random() < 0.5){
-          particles.push({
-            x: oo3.x + (Math.random()-0.5)*oo3.r*1.5,
-            y: oo3.y + (Math.random()-0.5)*oo3.r*1.5,
-            vx: (Math.random()-0.5)*140,
-            vy: (Math.random()-0.5)*140,
-            life: 0.3 + Math.random()*0.3, maxLife: 0.6,
-            color: '220,160,255', r: 1.2 + Math.random()*2
-          });
-        }
-
         if (oo3.lightningExposure >= OBS_LIGHTNING_HP){
           spawnBurst(oo3.x, oo3.y, '200,130,255', 22, 1.4);
           spawnRing(oo3.x, oo3.y, '200,130,255', 80);
@@ -1169,39 +977,45 @@ function update(rawDt){
       }
     }
   }
-
-  /* ==================================================
-     交換光球
-     ================================================== */
+  // 交換光球更新
   for (i=swapOrbs.length-1;i>=0;i--){
     var so = swapOrbs[i];
-    so.x += so.vx * sdt;
-    so.y += so.vy * sdt;
+    so.x += so.vx * sdt; so.y += so.vy * sdt;
     so.life -= sdt;
-
     if (so.x < so.r){ so.x = so.r; so.vx = Math.abs(so.vx)*ORB_WALL; }
     if (so.x > W-so.r){ so.x = W-so.r; so.vx = -Math.abs(so.vx)*ORB_WALL; }
     if (so.y < so.r){ so.y = so.r; so.vy = Math.abs(so.vy)*ORB_WALL; }
     if (so.y > H-so.r){ so.y = H-so.r; so.vy = -Math.abs(so.vy)*ORB_WALL; }
-
     so.trail.push({ x:so.x, y:so.y, life:0.25, maxLife:0.25 });
     if (so.trail.length > 16) so.trail.shift();
     for (var ti=so.trail.length-1;ti>=0;ti--){
       so.trail[ti].life -= vdt;
       if (so.trail[ti].life <= 0) so.trail.splice(ti,1);
     }
-
-    if (so.life <= 0){
-      swapOrbs.splice(i, 1);
-      continue;
+    if (so.life <= 0){ swapOrbs.splice(i, 1); continue; }
+    // 光球吃愛心
+    if (CONFIG.orbCanEatHearts){
+      for (var hi=hearts.length-1;hi>=0;hi--){
+        var hh = hearts[hi];
+        var odx = so.x - hh.x, ody = so.y - hh.y;
+        var orr = so.r + hh.r;
+        if (odx*odx + ody*ody < orr*orr){
+          hp = Math.min(hp + 1, MAX_HP);
+          spawnBurst(hh.x, hh.y, '255,120,160', 20, 1.3);
+          spawnRing(hh.x, hh.y, '255,120,160', 90);
+          showFloat(hh.x, hh.y - 30, '+1 HP', '#ff6b8a');
+          heartPickupSfx();
+          hearts.splice(hi,1);
+          break;
+        }
+      }
     }
-
+    // 光球撞子彈
     var orbHitByBullet = false;
     for (var bi=bullets.length-1;bi>=0;bi--){
       var bu = bullets[bi];
       if (bu.type === 'bomb') continue;
-      var dxb = so.x - bu.x;
-      var dyb = so.y - bu.y;
+      var dxb = so.x - bu.x, dyb = so.y - bu.y;
       var rrb = so.r + bu.r + ORB_HIT_PAD;
       if (dxb*dxb + dyb*dyb < rrb*rrb){
         spawnBurst(bu.x, bu.y, '255,220,160', 10, 1.0);
@@ -1216,16 +1030,13 @@ function update(rawDt){
       if (state !== 'playing') return;
       continue;
     }
-
+    // 光球撞障礙物
     var hitO = null;
     for (var j=0;j<obstacles.length;j++){
       var oo = obstacles[j];
       var dxo = so.x - oo.x, dyo = so.y - oo.y;
       var rro = so.r + oo.r;
-      if (dxo*dxo + dyo*dyo < rro*rro){
-        hitO = oo;
-        break;
-      }
+      if (dxo*dxo + dyo*dyo < rro*rro){ hitO = oo; break; }
     }
     if (hitO){
       spawnBurst(so.x, so.y, '94,200,255', 14, 1.2);
@@ -1234,7 +1045,7 @@ function update(rawDt){
       if (state !== 'playing') return;
       continue;
     }
-
+    // 光球撞炸彈
     var hitB = false;
     for (var k=0;k<bullets.length;k++){
       var bb = bullets[k];
@@ -1250,81 +1061,53 @@ function update(rawDt){
     }
     if (hitB){ swapOrbs.splice(i, 1); continue; }
   }
-
-  /* ==================================================
-     物理碰撞：光球 × 障礙物
-     ================================================== */
+  // 物理碰撞
   if (invuln <= 0){
     for (i=0;i<obstacles.length;i++){
       var ob = obstacles[i];
       if (!ob.inside) continue;
       var impP = collideBodies(player, ob, BOUNCE_REST_PO);
       if (impP > BOUNCE_FX_MIN){
-        var mx1 = (player.x + ob.x) * 0.5;
-        var my1 = (player.y + ob.y) * 0.5;
-        spawnBurst(mx1, my1, '220,230,255', 6, 0.7);
+        spawnBurst((player.x+ob.x)*0.5, (player.y+ob.y)*0.5, '220,230,255', 6, 0.7);
         shake = Math.min(14, shake + 4);
-        beep(320, 0.05, 'triangle', 0.05);
       }
     }
   }
-
-  /* ==================================================
-     物理碰撞：光球 × 炸彈
-     ================================================== */
   for (i=bullets.length-1;i>=0;i--){
     var bmb = bullets[i];
     if (bmb.type !== 'bomb') continue;
     if (invuln > 0) continue;
     var impB = collideBodies(player, bmb, BOUNCE_REST_PB);
     if (impB > BOUNCE_FX_MIN){
-      var mx2 = (player.x + bmb.x) * 0.5;
-      var my2 = (player.y + bmb.y) * 0.5;
-      spawnBurst(mx2, my2, '255,200,140', 7, 0.7);
+      spawnBurst((player.x+bmb.x)*0.5, (player.y+bmb.y)*0.5, '255,200,140', 7, 0.7);
       shake = Math.min(14, shake + 4);
-      beep(360, 0.05, 'triangle', 0.05);
     }
   }
-
-  /* ==================================================
-     物理碰撞：障礙物 × 炸彈
-     ================================================== */
   for (i=0;i<obstacles.length;i++){
     var oA = obstacles[i];
     if (!oA.inside) continue;
     for (var kk=0;kk<bullets.length;kk++){
       var bA = bullets[kk];
       if (bA.type !== 'bomb') continue;
-      var impOB = collideBodies(oA, bA, BOUNCE_REST_OB);
-      if (impOB > BOUNCE_FX_MIN){
-        var mx3 = (oA.x + bA.x) * 0.5;
-        var my3 = (oA.y + bA.y) * 0.5;
-        spawnBurst(mx3, my3, '255,180,120', 5, 0.6);
-      }
+      collideBodies(oA, bA, BOUNCE_REST_OB);
     }
   }
-
-  /* ---- 子彈更新 ---- */
+  // 子彈更新
   for (i=bullets.length-1;i>=0;i--){
     var b = bullets[i];
-
     if (b.type === 'bomb'){
       b.vy += b.bombGrav * sdt;
-      b.x += b.vx * sdt;
-      b.y += b.vy * sdt;
+      b.x += b.vx * sdt; b.y += b.vy * sdt;
       b.fuse -= sdt;
-
       if (b.x < b.r){ b.x = b.r; b.vx = Math.abs(b.vx)*0.72; }
       if (b.x > W-b.r){ b.x = W-b.r; b.vx = -Math.abs(b.vx)*0.72; }
       if (b.y < b.r){ b.y = b.r; b.vy = Math.abs(b.vy)*0.72; }
       if (b.y > H-b.r){ b.y = H-b.r; b.vy = -Math.abs(b.vy)*0.72; }
-
       var bd = Math.hypot(b.x - player.x, b.y - player.y);
       if (!b.safe){
         if (bd < DANGER_R_BOMB){ b.inDanger = true; b.wasInDanger = true; }
         else if (bd > DANGER_R_BOMB * DANGER_EXIT && b.inDanger){ b.inDanger = false; }
       }
-
       if (b.fuse <= 0){
         var ex = b.x, ey = b.y;
         var explodeR = 88;
@@ -1334,7 +1117,6 @@ function update(rawDt){
         shake = Math.min(26, shake + 16);
         flash = Math.min(1, flash + 0.35);
         beep(90, 0.35, 'sawtooth', 0.14);
-
         for (var oi=swapOrbs.length-1; oi>=0; oi--){
           var orb = swapOrbs[oi];
           var od = Math.hypot(orb.x - ex, orb.y - ey);
@@ -1344,7 +1126,6 @@ function update(rawDt){
             if (state !== 'playing') return;
           }
         }
-
         if (!b.safe && invuln <= 0){
           var dd = Math.hypot(player.x - ex, player.y - ey);
           if (dd < explodeR + player.r){
@@ -1355,57 +1136,43 @@ function update(rawDt){
             if (state !== 'playing') return;
           }
         }
-
         if (b.wasInDanger && !b.hitPlayer && !b.safe){
           var bombPts = BOMB_GRAZE_SCORE * Math.min(1 + grazeCombo * 0.5, 5);
-          bombPts = Math.floor(bombPts);
-          score += bombPts;
-          grazeCombo++;
+          score += Math.floor(bombPts); grazeCombo++;
           grazeComboTimer = COMBO_WINDOW;
-          showFloat(ex, ey - 30, '+' + bombPts + ' 驚險 x' + grazeCombo, '#ffd76b');
+          showFloat(ex, ey - 30, '+' + Math.floor(bombPts) + ' 驚險 x' + grazeCombo, '#ffd76b');
           beep(1200, 0.14, 'triangle', 0.09);
         }
-
         bullets.splice(i, 1);
         continue;
       }
       continue;
     }
-
-    b.x += b.vx * sdt;
-    b.y += b.vy * sdt;
+    b.x += b.vx * sdt; b.y += b.vy * sdt;
     b.life -= sdt;
-
     if (b.x < -140 || b.x > W+140 || b.y < -140 || b.y > H+140){
       if (b.wasInDanger && b.inDanger && !b.hitPlayer && !b.safe){
         var outPts = GRAZE_SCORE * Math.min(1 + grazeCombo * 0.5, 5);
-        outPts = Math.floor(outPts);
-        score += outPts;
-        grazeCombo++;
+        score += Math.floor(outPts); grazeCombo++;
         grazeComboTimer = COMBO_WINDOW;
       }
-      bullets.splice(i,1);
-      continue;
+      bullets.splice(i,1); continue;
     }
     if (b.life <= 0){ bullets.splice(i,1); continue; }
-
     var nd = Math.hypot(b.x - player.x, b.y - player.y);
     if (!b.safe){
       if (nd < DANGER_R_NORMAL){ b.inDanger = true; b.wasInDanger = true; }
       else if (nd > DANGER_R_NORMAL * DANGER_EXIT && b.inDanger){
         if (!b.hitPlayer && !b.safe){
           var pts = GRAZE_SCORE * Math.min(1 + grazeCombo * 0.5, 5);
-          pts = Math.floor(pts);
-          score += pts;
-          grazeCombo++;
+          score += Math.floor(pts); grazeCombo++;
           grazeComboTimer = COMBO_WINDOW;
-          showFloat(player.x, player.y - 42, '+' + pts + ' 擦身 x' + grazeCombo, '#ffd76b');
+          showFloat(player.x, player.y - 42, '+' + Math.floor(pts) + ' 擦身 x' + grazeCombo, '#ffd76b');
           beep(1150, 0.12, 'triangle', 0.09);
         }
         b.inDanger = false;
       }
     }
-
     var hitObstacle = false;
     for (var jj=obstacles.length-1;jj>=0;jj--){
       var oo2 = obstacles[jj];
@@ -1419,7 +1186,6 @@ function update(rawDt){
       }
     }
     if (hitObstacle){ bullets.splice(i, 1); continue; }
-
     if (!b.safe && invuln <= 0){
       var pdx = b.x - player.x, pdy = b.y - player.y;
       var prr = b.r + player.r;
@@ -1440,12 +1206,10 @@ function update(rawDt){
 function die(){
   state = 'dead';
   dieTimer = 0;
-  shake = 30;
-  flash = 1;
+  shake = 30; flash = 1;
   spawnBurst(player.x, player.y, '94,241,255', 46, 1.6);
   spawnBurst(player.x, player.y, '255,215,107', 22, 1.4);
   spawnRing(player.x, player.y, '94,241,255', 170);
-
   var fs = Math.floor(score);
   if (fs > best){
     best = fs;
@@ -1462,27 +1226,26 @@ function drawGravField(){
   var rp = Math.max(0, 1 - (W - player.x) / halfW);
   var tp = Math.max(0, 1 - player.y / halfH);
   var bp = Math.max(0, 1 - (H - player.y) / halfH);
-
   var thickness = 26;
-  if (lp > 0.02){
+  if (lp > 0.02 && CONFIG.gravLeft > 0){
     var lg = ctx.createLinearGradient(0,0,thickness,0);
     lg.addColorStop(0, 'rgba(255,180,120,' + (lp*0.42) + ')');
     lg.addColorStop(1, 'rgba(255,180,120,0)');
     ctx.fillStyle = lg; ctx.fillRect(0,0,thickness,H);
   }
-  if (rp > 0.02){
+  if (rp > 0.02 && CONFIG.gravRight > 0){
     var rg = ctx.createLinearGradient(W,0,W-thickness,0);
     rg.addColorStop(0, 'rgba(255,180,120,' + (rp*0.42) + ')');
     rg.addColorStop(1, 'rgba(255,180,120,0)');
     ctx.fillStyle = rg; ctx.fillRect(W-thickness,0,thickness,H);
   }
-  if (tp > 0.02){
+  if (tp > 0.02 && CONFIG.gravTop > 0){
     var tg = ctx.createLinearGradient(0,0,0,thickness);
     tg.addColorStop(0, 'rgba(255,180,120,' + (tp*0.42) + ')');
     tg.addColorStop(1, 'rgba(255,180,120,0)');
     ctx.fillStyle = tg; ctx.fillRect(0,0,W,thickness);
   }
-  if (bp > 0.02){
+  if (bp > 0.02 && CONFIG.gravBottom > 0){
     var bg2 = ctx.createLinearGradient(0,H,0,H-thickness);
     bg2.addColorStop(0, 'rgba(255,180,120,' + (bp*0.42) + ')');
     bg2.addColorStop(1, 'rgba(255,180,120,0)');
@@ -1494,28 +1257,19 @@ function drawScopeIcon(x, y, alpha){
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(x, y);
-
   ctx.strokeStyle = 'rgba(255,60,90,0.98)';
   ctx.fillStyle = 'rgba(255,60,90,0.98)';
   ctx.lineWidth = 2;
   ctx.shadowColor = 'rgba(255,60,90,0.98)';
   ctx.shadowBlur = 18;
-
-  ctx.beginPath();
-  ctx.arc(0, 0, 16, 0, Math.PI*2);
-  ctx.stroke();
-
+  ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI*2); ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(-24, 0); ctx.lineTo(-9, 0);
   ctx.moveTo(9, 0); ctx.lineTo(24, 0);
   ctx.moveTo(0, -24); ctx.lineTo(0, -9);
   ctx.moveTo(0, 9); ctx.lineTo(0, 24);
   ctx.stroke();
-
-  ctx.beginPath();
-  ctx.arc(0, 0, 2, 0, Math.PI*2);
-  ctx.fill();
-
+  ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fill();
   ctx.restore();
 }
 
@@ -1523,17 +1277,11 @@ function drawExclamIcon(x, y, alpha){
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(x, y);
-
   ctx.fillStyle = 'rgba(255,200,80,0.98)';
   ctx.shadowColor = 'rgba(255,200,80,0.98)';
   ctx.shadowBlur = 18;
-
-  roundRectPath(ctx, -3, -18, 6, 22, 3);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(0, 10, 4.2, 0, Math.PI*2);
-  ctx.fill();
-
+  roundRectPath(ctx, -3, -18, 6, 22, 3); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, 10, 4.2, 0, Math.PI*2); ctx.fill();
   ctx.restore();
 }
 
@@ -1541,103 +1289,74 @@ function drawLightningIcon(x, y, alpha){
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(x, y);
-
   ctx.strokeStyle = 'rgba(200,120,255,0.98)';
   ctx.fillStyle = 'rgba(200,120,255,0.98)';
   ctx.lineWidth = 2;
   ctx.lineJoin = 'round';
   ctx.shadowColor = 'rgba(200,120,255,0.98)';
   ctx.shadowBlur = 22;
-
   ctx.beginPath();
-  ctx.moveTo(6, -22);
-  ctx.lineTo(-10, 2);
-  ctx.lineTo(-1, 2);
-  ctx.lineTo(-6, 22);
-  ctx.lineTo(10, -4);
-  ctx.lineTo(1, -4);
-  ctx.closePath();
-  ctx.fill();
-
+  ctx.moveTo(6, -22); ctx.lineTo(-10, 2); ctx.lineTo(-1, 2);
+  ctx.lineTo(-6, 22); ctx.lineTo(10, -4); ctx.lineTo(1, -4);
+  ctx.closePath(); ctx.fill();
   ctx.restore();
 }
 
 function drawPending(p){
   if (p.type === 'lightning'){
     var liAlpha;
-    if (p.timer < 0.4){
-      liAlpha = 1;
-    } else {
+    if (p.timer < 0.4) liAlpha = 1;
+    else {
       var liFreq = 3 + (p.totalTime - p.timer) * 4;
       liAlpha = 0.65 + 0.35 * Math.sin(p.timer * liFreq * Math.PI * 2);
       if (liAlpha < 0.35) liAlpha = 0.35;
     }
-
     if (p.side === 0 || p.side === 1){
       var sy = p.side === 0 ? 0 : H;
       ctx.save();
       ctx.globalAlpha = 0.20 * liAlpha;
       ctx.strokeStyle = 'rgba(200,120,255,1)';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([10, 12]);
-      ctx.beginPath();
-      ctx.moveTo(0, sy);
-      ctx.lineTo(W, sy);
-      ctx.stroke();
+      ctx.lineWidth = 3; ctx.setLineDash([10, 12]);
+      ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke();
       ctx.restore();
     } else {
       var sx = p.side === 2 ? 0 : W;
       ctx.save();
       ctx.globalAlpha = 0.20 * liAlpha;
       ctx.strokeStyle = 'rgba(200,120,255,1)';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([10, 12]);
-      ctx.beginPath();
-      ctx.moveTo(sx, 0);
-      ctx.lineTo(sx, H);
-      ctx.stroke();
+      ctx.lineWidth = 3; ctx.setLineDash([10, 12]);
+      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke();
       ctx.restore();
     }
-
     ctx.save();
     ctx.globalAlpha = liAlpha;
     var lpct = 1 - p.timer / p.totalTime;
     ctx.strokeStyle = 'rgba(200,120,255,0.85)';
     ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(p.iconX, p.iconY, 26 + (1-lpct)*10, 0, Math.PI*2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(p.iconX, p.iconY, 26 + (1-lpct)*10, 0, Math.PI*2); ctx.stroke();
     ctx.restore();
-
     drawLightningIcon(p.iconX, p.iconY, liAlpha);
     return;
   }
-
   if (p.type === 'bomb'){
     var bpct = 1 - p.timer / p.totalTime;
     drawExclamIcon(p.iconX, p.iconY, 0.95);
     ctx.save();
     ctx.strokeStyle = 'rgba(255,200,80,0.7)';
     ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(p.iconX, p.iconY, 26 + (1-bpct)*8, 0, Math.PI*2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(p.iconX, p.iconY, 26 + (1-bpct)*8, 0, Math.PI*2); ctx.stroke();
     ctx.restore();
     return;
   }
-
   var alpha;
-  if (p.timer < 0.4){
-    alpha = 1;
-  } else {
+  if (p.timer < 0.4) alpha = 1;
+  else {
     var freq = 3 + (p.totalTime - p.timer) * 4;
     alpha = 0.6 + 0.4 * Math.sin(p.timer * freq * Math.PI * 2);
     if (alpha < 0.3) alpha = 0.3;
   }
-
   var ex = p.iconX + Math.cos(p.aimAngle) * 2600;
   var ey = p.iconY + Math.sin(p.aimAngle) * 2600;
-
   if (p.type === 'sniper'){
     ctx.save();
     ctx.globalAlpha = 0.9;
@@ -1645,14 +1364,9 @@ function drawPending(p){
     ctx.lineWidth = 1.8;
     ctx.shadowColor = 'rgba(255,40,60,0.98)';
     ctx.shadowBlur = 18;
-    ctx.beginPath();
-    ctx.moveTo(p.iconX, p.iconY);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p.iconX, p.iconY); ctx.lineTo(ex, ey); ctx.stroke();
     ctx.restore();
-
-    var ddx = player.x - p.iconX;
-    var ddy = player.y - p.iconY;
+    var ddx = player.x - p.iconX, ddy = player.y - p.iconY;
     var distP = Math.hypot(ddx, ddy);
     var angP = Math.atan2(ddy, ddx);
     var diffA = Math.abs(normalizeAngle(angP - p.aimAngle));
@@ -1663,94 +1377,65 @@ function drawPending(p){
       ctx.lineWidth = 3;
       ctx.shadowColor = 'rgba(255,40,60,1)';
       ctx.shadowBlur = 22;
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, player.r + 16, 0, Math.PI*2);
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 16, 0, Math.PI*2); ctx.stroke();
       ctx.restore();
     }
   } else {
     ctx.save();
     ctx.globalAlpha = 0.34;
     ctx.strokeStyle = 'rgba(255,140,160,0.9)';
-    ctx.lineWidth = 1.4;
-    ctx.setLineDash([6, 10]);
-    ctx.beginPath();
-    ctx.moveTo(p.iconX, p.iconY);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
+    ctx.lineWidth = 1.4; ctx.setLineDash([6, 10]);
+    ctx.beginPath(); ctx.moveTo(p.iconX, p.iconY); ctx.lineTo(ex, ey); ctx.stroke();
     ctx.restore();
   }
-
   drawScopeIcon(p.iconX, p.iconY, alpha);
 }
 
 function drawLightning(lt){
   var now = performance.now();
   var dangerGlow = (lt.dangerPhase === 'inDanger') ? 1 : 0;
-
   ctx.save();
-
   ctx.shadowColor = 'rgba(180,80,255,0.9)';
   ctx.shadowBlur = 40 + dangerGlow * 20;
   ctx.strokeStyle = 'rgba(180,80,255,0.55)';
   ctx.lineWidth = lt.thickness * 3.2;
   ctx.lineCap = 'round';
-
-  if (lt.horizontal){
-    ctx.beginPath();
-    ctx.moveTo(0, lt.pos);
-    ctx.lineTo(W, lt.pos);
-    ctx.stroke();
-  } else {
-    ctx.beginPath();
-    ctx.moveTo(lt.pos, 0);
-    ctx.lineTo(lt.pos, H);
-    ctx.stroke();
-  }
-
+  if (lt.horizontal){ ctx.beginPath(); ctx.moveTo(0, lt.pos); ctx.lineTo(W, lt.pos); ctx.stroke(); }
+  else { ctx.beginPath(); ctx.moveTo(lt.pos, 0); ctx.lineTo(lt.pos, H); ctx.stroke(); }
   ctx.shadowBlur = 22;
   ctx.strokeStyle = 'rgba(200,120,255,1)';
   ctx.lineWidth = lt.thickness;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   var segs = 22;
   if (lt.horizontal){
     ctx.beginPath();
     for (var i = 0; i <= segs; i++){
       var sx = i * (W / segs);
-      var off = Math.sin(now/90 + i*0.9 + lt.jitterSeed) * 3.5
-              + (Math.random() - 0.5) * 2.5;
+      var off = Math.sin(now/90 + i*0.9 + lt.jitterSeed) * 3.5 + (Math.random() - 0.5) * 2.5;
       var sy = lt.pos + off;
-      if (i === 0) ctx.moveTo(sx, sy);
-      else ctx.lineTo(sx, sy);
+      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
     }
     ctx.stroke();
   } else {
     ctx.beginPath();
     for (var k = 0; k <= segs; k++){
       var sy2 = k * (H / segs);
-      var off2 = Math.sin(now/90 + k*0.9 + lt.jitterSeed) * 3.5
-               + (Math.random() - 0.5) * 2.5;
+      var off2 = Math.sin(now/90 + k*0.9 + lt.jitterSeed) * 3.5 + (Math.random() - 0.5) * 2.5;
       var sx2 = lt.pos + off2;
-      if (k === 0) ctx.moveTo(sx2, sy2);
-      else ctx.lineTo(sx2, sy2);
+      if (k === 0) ctx.moveTo(sx2, sy2); else ctx.lineTo(sx2, sy2);
     }
     ctx.stroke();
   }
-
   ctx.shadowBlur = 0;
   ctx.strokeStyle = 'rgba(255,255,255,0.95)';
   ctx.lineWidth = lt.thickness * 0.35;
-
   if (lt.horizontal){
     ctx.beginPath();
     for (var j = 0; j <= segs; j++){
       var wx = j * (W / segs);
       var woff = Math.sin(now/90 + j*0.9 + lt.jitterSeed) * 3.5;
       var wy = lt.pos + woff;
-      if (j === 0) ctx.moveTo(wx, wy);
-      else ctx.lineTo(wx, wy);
+      if (j === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
     }
     ctx.stroke();
   } else {
@@ -1759,53 +1444,32 @@ function drawLightning(lt){
       var wy2 = n * (H / segs);
       var woff2 = Math.sin(now/90 + n*0.9 + lt.jitterSeed) * 3.5;
       var wx2 = lt.pos + woff2;
-      if (n === 0) ctx.moveTo(wx2, wy2);
-      else ctx.lineTo(wx2, wy2);
+      if (n === 0) ctx.moveTo(wx2, wy2); else ctx.lineTo(wx2, wy2);
     }
     ctx.stroke();
   }
-
   ctx.restore();
-
   if (dangerGlow > 0){
     ctx.save();
     ctx.globalAlpha = 0.12;
     ctx.fillStyle = 'rgba(200,120,255,1)';
-    if (lt.horizontal){
-      ctx.fillRect(0, lt.pos - LIGHTNING_DANGER, W, LIGHTNING_DANGER*2);
-    } else {
-      ctx.fillRect(lt.pos - LIGHTNING_DANGER, 0, LIGHTNING_DANGER*2, H);
-    }
+    if (lt.horizontal) ctx.fillRect(0, lt.pos - LIGHTNING_DANGER, W, LIGHTNING_DANGER*2);
+    else ctx.fillRect(lt.pos - LIGHTNING_DANGER, 0, LIGHTNING_DANGER*2, H);
     ctx.restore();
   }
 }
 
 function drawStick(){
   if (!stickActive) return;
-
   ctx.save();
-
-  ctx.beginPath();
-  ctx.arc(stickCx, stickCy, STICK_MAX_R, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(255,215,107,0.025)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255,215,107,0.16)';
-  ctx.lineWidth = 1.6;
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.arc(stickCx, stickCy, 4, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(255,215,107,0.22)';
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.arc(stickX, stickY, 18, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(255,215,107,0.10)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255,215,107,0.32)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
+  ctx.beginPath(); ctx.arc(stickCx, stickCy, STICK_MAX_R, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,215,107,0.025)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,215,107,0.16)'; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.beginPath(); ctx.arc(stickCx, stickCy, 4, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,215,107,0.22)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(stickX, stickY, 18, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,215,107,0.10)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,215,107,0.32)'; ctx.lineWidth = 2; ctx.stroke();
   if (stickMag > STICK_MIN_MAG){
     ctx.save();
     ctx.setLineDash([10, 8]);
@@ -1819,11 +1483,9 @@ function drawStick(){
     ctx.stroke();
     ctx.restore();
   }
-
   ctx.restore();
 }
 
-// ★ 繪製愛心形狀（共用）
 function drawHeartShape(c, x, y, s){
   c.beginPath();
   c.moveTo(x, y + s * 0.4);
@@ -1836,31 +1498,19 @@ function drawHeartShape(c, x, y, s){
 
 function draw(){
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, cssW, cssH);
-
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cssW, cssH);
   ctx.save();
   ctx.translate(viewOffsetX, viewOffsetY);
-  ctx.beginPath();
-  ctx.rect(0, 0, W, H);
-  ctx.clip();
-
+  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
   var bg = ctx.createLinearGradient(0, 0, 0, H);
   bg.addColorStop(0, '#0c0a24');
   bg.addColorStop(0.5, '#080620');
   bg.addColorStop(1, '#100a26');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
-
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
   drawGravField();
-
   ctx.save();
-  if (shake > 0.2){
-    ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
-  }
-
+  if (shake > 0.2) ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
   var i, o, b, p, s, l, f, t, so, pa, lt;
-
   for (i=0;i<swapTrails.length;i++){
     l = swapTrails[i];
     var la = l.life / l.maxLife;
@@ -1870,15 +1520,10 @@ function draw(){
     ctx.strokeStyle = 'rgba(' + lc + ',1)';
     ctx.lineWidth = 6 * la + 2;
     ctx.shadowColor = 'rgba(' + lc + ',1)';
-    ctx.shadowBlur = 28;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(l.x1, l.y1);
-    ctx.lineTo(l.x2, l.y2);
-    ctx.stroke();
+    ctx.shadowBlur = 28; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); ctx.stroke();
     ctx.restore();
   }
-
   for (i=0;i<swapEchoes.length;i++){
     var ec = swapEchoes[i];
     var ea = ec.life / ec.maxLife;
@@ -1888,12 +1533,9 @@ function draw(){
     ctx.lineWidth = 3;
     ctx.shadowColor = 'rgba(' + ec.color + ',1)';
     ctx.shadowBlur = 20;
-    ctx.beginPath();
-    ctx.arc(ec.x, ec.y, ec.r * (1 + (1-ea)*1.6), 0, Math.PI*2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(ec.x, ec.y, ec.r * (1 + (1-ea)*1.6), 0, Math.PI*2); ctx.stroke();
     ctx.restore();
   }
-
   for (i=0;i<shocks.length;i++){
     s = shocks[i];
     var sa = s.life / s.maxLife;
@@ -1901,17 +1543,13 @@ function draw(){
     ctx.globalAlpha = sa * 0.85;
     ctx.strokeStyle = 'rgba(' + s.color + ',1)';
     ctx.lineWidth = 3 * sa + 1;
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.stroke();
     ctx.restore();
   }
-
   for (i=0;i<obstacles.length;i++){
     o = obstacles[i];
     var glow = o.hitGlow > 0 ? o.hitGlow : 0;
     var lGlow = o.lightningGlow > 0 ? o.lightningGlow : 0;
-
     ctx.save();
     if (lGlow > 0.1){
       ctx.shadowColor = 'rgba(200,120,255,' + (0.6 + lGlow*0.35) + ')';
@@ -1922,149 +1560,86 @@ function draw(){
     }
     var og = ctx.createRadialGradient(o.x - o.r*0.3, o.y - o.r*0.3, 0, o.x, o.y, o.r);
     if (lGlow > 0.3){
-      og.addColorStop(0, '#f3e0ff');
-      og.addColorStop(1, '#a04de8');
+      og.addColorStop(0, '#f3e0ff'); og.addColorStop(1, '#a04de8');
     } else {
       og.addColorStop(0, glow > 0.3 ? '#fff0c8' : '#ffc98a');
       og.addColorStop(1, glow > 0.3 ? '#ff8844' : '#d9772e');
     }
     ctx.fillStyle = og;
-    ctx.beginPath();
-    ctx.arc(o.x, o.y, o.r, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
-
-    ctx.translate(o.x, o.y);
-    ctx.rotate(o.rot);
+    ctx.translate(o.x, o.y); ctx.rotate(o.rot);
     ctx.strokeStyle = 'rgba(255,255,255,' + (0.35 + glow*0.4 + lGlow*0.4) + ')';
     ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(0, 0, o.r * 0.55, 0, Math.PI * 1.3);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, o.r * 0.55, 0, Math.PI * 1.3); ctx.stroke();
     ctx.restore();
   }
-
   for (i=0;i<trails.length;i++){
     t = trails[i];
     var ta = t.life / t.maxLife;
     ctx.globalAlpha = ta * 0.4;
     ctx.fillStyle = '#5ef1ff';
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, player.r * (0.3 + ta * 0.7), 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(t.x, t.y, player.r * (0.3 + ta * 0.7), 0, Math.PI*2); ctx.fill();
   }
   ctx.globalAlpha = 1;
-
-  for (i=0;i<lightnings.length;i++){
-    drawLightning(lightnings[i]);
-  }
-
-  // ★ 愛心（更精緻的圖示）
-  if (heartPickup){
+  for (i=0;i<lightnings.length;i++) drawLightning(lightnings[i]);
+  for (i=0;i<hearts.length;i++){
+    var h = hearts[i];
     var hpPulse = 0.75 + 0.25 * Math.sin(performance.now()/220);
-    var lifeRatio = Math.max(0, heartPickup.life / HEART_LIFE);
-
+    var lifeRatio = Math.max(0, h.life / HEART_LIFE);
     ctx.save();
-
-    // 外層光暈
-    var hglow = ctx.createRadialGradient(
-      heartPickup.x, heartPickup.y, 0,
-      heartPickup.x, heartPickup.y, heartPickup.r * 3.2
-    );
+    var hglow = ctx.createRadialGradient(h.x, h.y, 0, h.x, h.y, h.r * 3.2);
     hglow.addColorStop(0, 'rgba(255,120,160,' + (0.55 * hpPulse) + ')');
     hglow.addColorStop(0.5, 'rgba(255,80,120,' + (0.2 * hpPulse) + ')');
     hglow.addColorStop(1, 'rgba(255,80,120,0)');
     ctx.fillStyle = hglow;
-    ctx.beginPath();
-    ctx.arc(heartPickup.x, heartPickup.y, heartPickup.r * 3.2, 0, Math.PI*2);
-    ctx.fill();
-
-    // 愛心本體
-    ctx.translate(heartPickup.x, heartPickup.y);
-    ctx.scale(hpPulse, hpPulse);
-
-    // 陰影
+    ctx.beginPath(); ctx.arc(h.x, h.y, h.r * 3.2, 0, Math.PI*2); ctx.fill();
+    ctx.translate(h.x, h.y); ctx.scale(hpPulse, hpPulse);
     ctx.shadowColor = 'rgba(255,80,120,0.95)';
     ctx.shadowBlur = 24;
     ctx.fillStyle = '#c81e45';
-    drawHeartShape(ctx, 0, 0, heartPickup.r * 0.95);
-    ctx.fill();
-
-    // 內部漸層
+    drawHeartShape(ctx, 0, 0, h.r * 0.95); ctx.fill();
     ctx.shadowBlur = 0;
-    var hg = ctx.createRadialGradient(
-      -heartPickup.r*0.35, -heartPickup.r*0.35, 0,
-      0, 0, heartPickup.r * 0.95
-    );
-    hg.addColorStop(0, '#ffffff');
-    hg.addColorStop(0.35, '#ff8fa8');
-    hg.addColorStop(1, '#e0254f');
+    var hg = ctx.createRadialGradient(-h.r*0.35, -h.r*0.35, 0, 0, 0, h.r * 0.95);
+    hg.addColorStop(0, '#ffffff'); hg.addColorStop(0.35, '#ff8fa8'); hg.addColorStop(1, '#e0254f');
     ctx.fillStyle = hg;
-    drawHeartShape(ctx, 0, 0, heartPickup.r * 0.95);
-    ctx.fill();
-
-    // 白色高光
+    drawHeartShape(ctx, 0, 0, h.r * 0.95); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.beginPath();
-    ctx.ellipse(
-      -heartPickup.r*0.35, -heartPickup.r*0.25,
-      heartPickup.r*0.22, heartPickup.r*0.13,
-      -0.5, 0, Math.PI*2
-    );
-    ctx.fill();
-
+    ctx.beginPath(); ctx.ellipse(-h.r*0.35, -h.r*0.25, h.r*0.22, h.r*0.13, -0.5, 0, Math.PI*2); ctx.fill();
     ctx.restore();
-
-    // 剩餘時間圈
     ctx.save();
     ctx.strokeStyle = 'rgba(255,180,200,0.8)';
     ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(heartPickup.x, heartPickup.y, heartPickup.r + 8,
-      -Math.PI/2, -Math.PI/2 + Math.PI*2 * lifeRatio);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 8, -Math.PI/2, -Math.PI/2 + Math.PI*2 * lifeRatio); ctx.stroke();
     ctx.restore();
   }
-
   for (i=0;i<swapOrbs.length;i++){
     so = swapOrbs[i];
-
     for (var ti=0;ti<so.trail.length;ti++){
       var tt = so.trail[ti];
       var tta = tt.life / tt.maxLife;
       ctx.globalAlpha = tta * 0.55;
       ctx.fillStyle = '#5ecbff';
-      ctx.beginPath();
-      ctx.arc(tt.x, tt.y, so.r * (0.4 + tta*0.9), 0, Math.PI*2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(tt.x, tt.y, so.r * (0.4 + tta*0.9), 0, Math.PI*2); ctx.fill();
     }
     ctx.globalAlpha = 1;
-
     ctx.save();
     ctx.shadowColor = 'rgba(94,200,255,1)';
     ctx.shadowBlur = 24;
     var sog = ctx.createRadialGradient(so.x, so.y, 0, so.x, so.y, so.r*1.8);
-    sog.addColorStop(0, '#ffffff');
-    sog.addColorStop(0.4, '#5ecbff');
-    sog.addColorStop(1, 'rgba(30,120,220,0)');
+    sog.addColorStop(0, '#ffffff'); sog.addColorStop(0.4, '#5ecbff'); sog.addColorStop(1, 'rgba(30,120,220,0)');
     ctx.fillStyle = sog;
-    ctx.beginPath();
-    ctx.arc(so.x, so.y, so.r*1.8, 0, Math.PI*2);
-    ctx.fill();
-
+    ctx.beginPath(); ctx.arc(so.x, so.y, so.r*1.8, 0, Math.PI*2); ctx.fill();
     var pulse = 0.5 + 0.5*Math.sin(performance.now()/180);
     ctx.strokeStyle = 'rgba(255,255,255,' + (0.35 + pulse*0.35) + ')';
     ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.arc(so.x, so.y, so.r + 4 + pulse*1.5, 0, Math.PI*2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(so.x, so.y, so.r + 4 + pulse*1.5, 0, Math.PI*2); ctx.stroke();
     ctx.restore();
   }
-
   for (i=0;i<bullets.length;i++){
     b = bullets[i];
     if (b.type === 'bomb'){
-      var fuseRatio = b.fuse / 2.4;
+      var fuseRatio = b.fuse / CONFIG.bombFuse;
       var col = fuseRatio < 0.35 ? '255,120,60' : '255,180,90';
       ctx.save();
       ctx.shadowColor = 'rgba(' + col + ',0.95)';
@@ -2074,30 +1649,20 @@ function draw(){
       bgg.addColorStop(0.5, 'rgba(' + col + ',0.8)');
       bgg.addColorStop(1, 'rgba(' + col + ',0)');
       ctx.fillStyle = bgg;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r*1.6, 0, Math.PI*2);
-      ctx.fill();
-
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r*1.6, 0, Math.PI*2); ctx.fill();
       ctx.fillStyle = 'rgba(' + col + ',1)';
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
-      ctx.fill();
-
-      var pct = Math.max(0, Math.min(1, b.fuse / 2.4));
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
+      var pct = Math.max(0, Math.min(1, b.fuse / CONFIG.bombFuse));
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
       ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r + 5, -Math.PI/2, -Math.PI/2 + Math.PI*2*pct);
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 5, -Math.PI/2, -Math.PI/2 + Math.PI*2*pct); ctx.stroke();
       ctx.restore();
       continue;
     }
-
     var isSniper = (b.type === 'sniper');
     var ang = Math.atan2(b.vy, b.vx);
     var scaleX = isSniper ? 3.2 : 2.1;
     var scaleY = isSniper ? 1.0 : 1.1;
-
     ctx.save();
     var tailLen = isSniper ? 40 : 22;
     var tx = b.x - Math.cos(ang) * tailLen;
@@ -2108,37 +1673,22 @@ function draw(){
     ctx.strokeStyle = tg;
     ctx.lineWidth = b.r * 1.4;
     ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(b.x, b.y);
-    ctx.lineTo(tx, ty);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(tx, ty); ctx.stroke();
     ctx.restore();
-
     ctx.save();
-    ctx.translate(b.x, b.y);
-    ctx.rotate(ang);
-    ctx.scale(scaleX, scaleY);
+    ctx.translate(b.x, b.y); ctx.rotate(ang); ctx.scale(scaleX, scaleY);
     ctx.shadowColor = 'rgba(235,240,250,1)';
     ctx.shadowBlur = isSniper ? 26 : 18;
     var sg = ctx.createRadialGradient(-b.r*0.3, -b.r*0.3, 0, 0, 0, b.r);
-    sg.addColorStop(0, '#ffffff');
-    sg.addColorStop(0.6, '#dfe6f2');
-    sg.addColorStop(1, '#9aa8c0');
+    sg.addColorStop(0, '#ffffff'); sg.addColorStop(0.6, '#dfe6f2'); sg.addColorStop(1, '#9aa8c0');
     ctx.fillStyle = sg;
-    ctx.beginPath();
-    ctx.arc(0, 0, b.r, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI*2); ctx.fill();
     ctx.restore();
-
     ctx.save();
-    ctx.globalAlpha = 0.9;
-    ctx.fillStyle = 'rgba(255,255,255,1)';
-    ctx.beginPath();
-    ctx.arc(b.x, b.y, b.r*0.35, 0, Math.PI*2);
-    ctx.fill();
+    ctx.globalAlpha = 0.9; ctx.fillStyle = 'rgba(255,255,255,1)';
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r*0.35, 0, Math.PI*2); ctx.fill();
     ctx.restore();
   }
-
   if (state !== 'dead'){
     var blink = (invuln > 0 && state === 'playing' && Math.floor(invuln*20)%2===0);
     if (!blink){
@@ -2148,60 +1698,41 @@ function draw(){
       pg.addColorStop(0.35, 'rgba(94,241,255,0.7)');
       pg.addColorStop(1, 'rgba(30,120,200,0)');
       ctx.fillStyle = pg;
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, player.r*2.4, 0, Math.PI*2);
-      ctx.fill();
-
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.r*2.4, 0, Math.PI*2); ctx.fill();
       ctx.shadowColor = 'rgba(94,241,255,0.95)';
       ctx.shadowBlur = 26;
-      var cg = ctx.createRadialGradient(
-        player.x - player.r*0.3, player.y - player.r*0.3, 0,
-        player.x, player.y, player.r);
-      cg.addColorStop(0, '#ffffff');
-      cg.addColorStop(0.6, '#7ef3ff');
-      cg.addColorStop(1, '#28a8d8');
+      var cg = ctx.createRadialGradient(player.x - player.r*0.3, player.y - player.r*0.3, 0, player.x, player.y, player.r);
+      cg.addColorStop(0, '#ffffff'); cg.addColorStop(0.6, '#7ef3ff'); cg.addColorStop(1, '#28a8d8');
       ctx.fillStyle = cg;
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, player.r, 0, Math.PI*2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
       ctx.shadowBlur = 0;
-
       if (jumpCd > 0){
-        var jp = 1 - jumpCd / JUMP_COOLDOWN;
+        var jp = 1 - jumpCd / CONFIG.jumpCooldown;
         ctx.strokeStyle = 'rgba(255,215,107,0.8)';
         ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.arc(player.x, player.y, player.r + 5, -Math.PI/2, -Math.PI/2 + Math.PI*2*jp);
-        ctx.stroke();
+        ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 5, -Math.PI/2, -Math.PI/2 + Math.PI*2*jp); ctx.stroke();
       } else {
         ctx.strokeStyle = 'rgba(255,215,107,' + (0.28 + Math.sin(performance.now()/400)*0.2) + ')';
         ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(player.x, player.y, player.r + 5, 0, Math.PI*2);
-        ctx.stroke();
+        ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 5, 0, Math.PI*2); ctx.stroke();
       }
       ctx.restore();
     }
   }
-
   for (i=0;i<particles.length;i++){
     p = particles[i];
     var pa2 = Math.max(0, p.life / p.maxLife);
     ctx.globalAlpha = pa2;
     ctx.fillStyle = 'rgba(' + p.color + ',1)';
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r*pa2 + 0.5, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r*pa2 + 0.5, 0, Math.PI*2); ctx.fill();
   }
   ctx.globalAlpha = 1;
-
   for (i=0;i<floats.length;i++){
     f = floats[i];
     var fa = f.life / f.maxLife;
     ctx.save();
     ctx.globalAlpha = fa;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = '700 20px sans-serif';
     ctx.fillStyle = f.color;
     ctx.shadowColor = f.color;
@@ -2209,98 +1740,69 @@ function draw(){
     ctx.fillText(f.text, f.x, f.y);
     ctx.restore();
   }
-
-  for (i=0;i<pending.length;i++){
-    pa = pending[i];
-    drawPending(pa);
-  }
-
+  for (i=0;i<pending.length;i++) drawPending(pending[i]);
   ctx.restore();
-
   drawStick();
-
   if (dangerActive && state === 'playing'){
     ctx.save();
     ctx.strokeStyle = 'rgba(200,120,255,' + (0.35 + Math.sin(performance.now()/120)*0.18) + ')';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(2, 2, W-4, H-4);
+    ctx.lineWidth = 4; ctx.strokeRect(2, 2, W-4, H-4);
     ctx.restore();
   } else if (stickActive && state === 'playing'){
     ctx.save();
     ctx.strokeStyle = 'rgba(255,215,107,' + (0.14 + Math.sin(performance.now()/220)*0.08) + ')';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(2, 2, W-4, H-4);
+    ctx.lineWidth = 2; ctx.strokeRect(2, 2, W-4, H-4);
     ctx.restore();
   }
-
   if (flash > 0.01){
     ctx.fillStyle = 'rgba(200,235,255,' + (flash*0.18) + ')';
     ctx.fillRect(0, 0, W, H);
   }
-
   drawHUD();
-
   ctx.restore();
-
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.strokeStyle = 'rgba(60,80,120,0.5)';
   ctx.lineWidth = 1;
   ctx.strokeRect(viewOffsetX-0.5, viewOffsetY-0.5, W+1, H+1);
 }
 
-/* ===================== HUD ===================== */
 function drawHeart(x, y, s){
-  drawHeartShape(ctx, x, y, s);
-  ctx.fill();
+  drawHeartShape(ctx, x, y, s); ctx.fill();
 }
 
 function drawHUD(){
   ctx.save();
-
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   ctx.font = '700 44px sans-serif';
   ctx.fillStyle = '#eaf6ff';
   ctx.shadowColor = 'rgba(94,241,255,0.7)';
   ctx.shadowBlur = 16;
   ctx.fillText(String(Math.floor(score)), 22, 18);
   ctx.shadowBlur = 0;
-
   ctx.font = '600 12px sans-serif';
   ctx.fillStyle = 'rgba(180,215,255,0.65)';
   ctx.fillText('BEST  ' + best, 24, 70);
-
   ctx.font = '600 12px sans-serif';
   ctx.fillStyle = 'rgba(140,220,180,0.85)';
   ctx.fillText('TIME  ' + elapsed.toFixed(1) + 's', 24, 88);
-
   var rate = TIME_SCORE_BASE * (1 + elapsed / TIME_SCORE_RAMP);
   ctx.fillStyle = 'rgba(140,220,180,0.55)';
   ctx.fillText('+' + rate.toFixed(1) + '/s', 24, 106);
-
   ctx.textAlign = 'right';
   for (var i=0;i<MAX_HP;i++){
-    var hx = W - 24 - i*30;
-    var hy = 30;
+    var hx = W - 24 - i*30, hy = 30;
     ctx.save();
-    if (i < hp){
-      ctx.fillStyle = '#ff4d6d';
-      ctx.shadowColor = 'rgba(255,77,109,0.9)';
-      ctx.shadowBlur = 14;
-    } else {
-      ctx.fillStyle = 'rgba(120,140,170,0.35)';
-    }
+    if (i < hp){ ctx.fillStyle = '#ff4d6d'; ctx.shadowColor = 'rgba(255,77,109,0.9)'; ctx.shadowBlur = 14; }
+    else ctx.fillStyle = 'rgba(120,140,170,0.35)';
     drawHeart(hx, hy, 10);
     ctx.restore();
   }
-
   if (grazeCombo > 1 && grazeComboTimer > 0){
     ctx.textAlign = 'right';
     ctx.font = '700 22px sans-serif';
     ctx.fillStyle = 'rgba(255,220,120,' + Math.min(1, grazeComboTimer/COMBO_WINDOW + 0.3) + ')';
     ctx.fillText('GRAZE x' + grazeCombo, W - 24, 70);
   }
-
   if (state === 'playing'){
     ctx.textAlign = 'left';
     ctx.font = '600 12px sans-serif';
@@ -2309,7 +1811,6 @@ function drawHUD(){
     ctx.textAlign = 'right';
     ctx.fillStyle = 'rgba(255,215,107,0.6)';
     ctx.fillText('按住右半拖曳搖桿・放開發射 ▶', W - 22, H - 26);
-
     if (stickActive){
       ctx.textAlign = 'center';
       ctx.font = '700 14px sans-serif';
@@ -2317,10 +1818,7 @@ function drawHUD(){
       ctx.fillText('點左半螢幕或按空白鍵取消', W/2, H - 52);
     }
   }
-
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   if (state === 'ready'){
     ctx.font = '700 32px sans-serif';
     ctx.fillStyle = '#eaf6ff';
@@ -2328,7 +1826,6 @@ function drawHUD(){
     ctx.shadowBlur = 22;
     ctx.fillText('交 換 者 · 四象', W/2, H*0.10);
     ctx.shadowBlur = 0;
-
     ctx.font = '600 13px sans-serif';
     ctx.fillStyle = 'rgba(94,241,255,0.95)';
     ctx.fillText('點左半 / 空白鍵 → 朝反重力彈跳', W/2, H*0.10 + 40);
@@ -2336,7 +1833,6 @@ function drawHUD(){
     ctx.fillText('按住右半拖曳搖桿 → 放開發射藍色交換光球', W/2, H*0.10 + 62);
     ctx.fillStyle = 'rgba(255,140,165,0.9)';
     ctx.fillText('瞄準中點左半或按空白鍵可取消', W/2, H*0.10 + 84);
-
     ctx.font = '500 12px sans-serif';
     ctx.fillStyle = 'rgba(200,120,255,0.95)';
     ctx.fillText('★ 紫色雷電會緩緩橫掠全場，碰到立即受傷', W/2, H*0.10 + 114);
@@ -2346,29 +1842,24 @@ function drawHUD(){
     ctx.fillText('藍色光球可以穿透雷電　障礙物會被慢慢燒毀', W/2, H*0.10 + 158);
     ctx.fillStyle = 'rgba(255,180,120,0.95)';
     ctx.fillText('存活越久分數越高，驚險逃離可累積 Combo', W/2, H*0.10 + 178);
-
     var pulse = 0.55 + Math.sin(performance.now()/380)*0.45;
     ctx.globalAlpha = pulse;
     ctx.font = '700 19px sans-serif';
     ctx.fillStyle = '#5ef1ff';
     ctx.fillText('點一下開始', W/2, H*0.87);
     ctx.globalAlpha = 1;
-
   } else if (state === 'dead'){
     ctx.fillStyle = 'rgba(5,6,14,0.72)';
     ctx.fillRect(0, 0, W, H);
-
     ctx.font = '700 26px sans-serif';
     ctx.fillStyle = '#ff6b8a';
     ctx.shadowColor = 'rgba(255,60,100,0.85)';
     ctx.shadowBlur = 22;
     ctx.fillText('結　束', W/2, H*0.26);
     ctx.shadowBlur = 0;
-
     ctx.font = '700 66px sans-serif';
     ctx.fillStyle = '#eaf6ff';
     ctx.fillText(String(Math.floor(score)), W/2, H*0.36);
-
     ctx.font = '500 14px sans-serif';
     if (score >= best && score > 0){
       ctx.fillStyle = '#ffd76b';
@@ -2378,18 +1869,14 @@ function drawHUD(){
       var diff = Math.max(0, best - Math.floor(score));
       ctx.fillText('最高分 ' + best + '　差 ' + diff + ' 分', W/2, H*0.46);
     }
-
     ctx.fillStyle = 'rgba(140,220,180,0.9)';
     ctx.font = '600 14px sans-serif';
     ctx.fillText('存活 ' + elapsed.toFixed(1) + ' 秒', W/2, H*0.54);
-
     ctx.fillStyle = 'rgba(140,220,180,0.7)';
     ctx.font = '500 12px sans-serif';
     ctx.fillText('時間得分 ' + Math.floor(timeScore), W/2, H*0.58);
-
     ctx.fillStyle = 'rgba(255,215,107,0.7)';
     ctx.fillText('驚險得分 ' + Math.floor(score - timeScore), W/2, H*0.62);
-
     if (dieTimer > 0.5){
       var pulse2 = 0.55 + Math.sin(performance.now()/380)*0.45;
       ctx.globalAlpha = pulse2;
@@ -2399,8 +1886,106 @@ function drawHUD(){
       ctx.globalAlpha = 1;
     }
   }
-
   ctx.restore();
+}
+
+/* ===================== 設定面板 UI ===================== */
+var settingsPanel = document.getElementById('settingsPanel');
+var openBtn = document.getElementById('openSettingsBtn');
+var closeBtn = document.getElementById('closeSettingsBtn');
+var resetBtn = document.getElementById('resetSettingsBtn');
+var slidersContainer = document.getElementById('slidersContainer');
+
+var sliderDefs = [
+  { key: 'jumpImpulse', label: '彈跳力度', min: 0, max: 800, step: 10 },
+  { key: 'jumpCooldown', label: '彈跳冷卻 (秒)', min: 0, max: 1.5, step: 0.05 },
+  { key: 'initialObstacles', label: '初始障礙物數量', min: 0, max: 10, step: 1 },
+  { key: 'obstacleSpawnInterval', label: '新障礙物頻率 (秒)', min: 0, max: 6, step: 0.1 },
+  { key: 'orbSpeed', label: '交換光球速度', min: 100, max: 1200, step: 20 },
+  { key: 'maxHearts', label: '愛心畫面生成上限', min: 0, max: 5, step: 1 },
+  { key: 'heartSpawnInterval', label: '愛心生成頻率 (秒)', min: 1, max: 20, step: 0.5 },
+  { key: 'orbCanEatHearts', label: '交換光球可以吃愛心', type: 'checkbox' },
+  { key: 'gravTop', label: '上邊重力場強度', min: 0, max: 600, step: 10 },
+  { key: 'gravBottom', label: '下邊重力場強度', min: 0, max: 600, step: 10 },
+  { key: 'gravLeft', label: '左邊重力場強度', min: 0, max: 600, step: 10 },
+  { key: 'gravRight', label: '右邊重力場強度', min: 0, max: 600, step: 10 },
+  { key: 'normalBulletSpeed', label: '普通子彈速度', min: 80, max: 800, step: 10 },
+  { key: 'normalBulletInterval', label: '普通子彈生成頻率 (秒)', min: 0, max: 5, step: 0.1 },
+  { key: 'sniperBulletSpeed', label: '狙擊子彈速度', min: 200, max: 1200, step: 20 },
+  { key: 'sniperBulletInterval', label: '狙擊生成頻率 (秒)', min: 0, max: 6, step: 0.1 },
+  { key: 'bombSpeed', label: '炸彈拋進來時速度', min: 80, max: 800, step: 10 },
+  { key: 'bombInterval', label: '炸彈生成頻率 (秒)', min: 0, max: 10, step: 0.2 },
+  { key: 'bombFuse', label: '炸彈出場到爆炸間隔 (秒)', min: 0.5, max: 5, step: 0.1 },
+  { key: 'lightningSpeed', label: '雷電速度', min: 10, max: 300, step: 5 },
+  { key: 'lightningInterval', label: '雷電生成頻率 (秒)', min: 0, max: 20, step: 0.5 }
+];
+
+function buildSettingsUI(){
+  slidersContainer.innerHTML = '';
+  sliderDefs.forEach(function(def){
+    var row = document.createElement('div');
+    row.className = 'setting-row';
+    var label = document.createElement('label');
+    label.textContent = def.label;
+    row.appendChild(label);
+
+    if (def.type === 'checkbox'){
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = CONFIG[def.key];
+      cb.addEventListener('change', function(){
+        CONFIG[def.key] = cb.checked;
+        saveConfig();
+      });
+      row.appendChild(cb);
+    } else {
+      var slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = def.min;
+      slider.max = def.max;
+      slider.step = def.step;
+      slider.value = CONFIG[def.key];
+      var val = document.createElement('span');
+      val.className = 'val';
+      val.textContent = CONFIG[def.key];
+      slider.addEventListener('input', function(){
+        CONFIG[def.key] = parseFloat(slider.value);
+        val.textContent = CONFIG[def.key];
+        saveConfig();
+      });
+      row.appendChild(slider);
+      row.appendChild(val);
+    }
+    slidersContainer.appendChild(row);
+  });
+}
+
+buildSettingsUI();
+
+openBtn.addEventListener('click', function(){
+  settingsPanel.classList.add('show');
+  openBtn.style.display = 'none';
+});
+closeBtn.addEventListener('click', function(){
+  settingsPanel.classList.remove('show');
+  // 交給 updateSettingsBtnVisibility 自動決定是否顯示
+});
+resetBtn.addEventListener('click', function(){
+  for (var k in DEFAULT_CONFIG) CONFIG[k] = DEFAULT_CONFIG[k];
+  saveConfig();
+  buildSettingsUI();
+});
+
+/* ★ 設定按鈕顯示邏輯：ready 或 dead 狀態都顯示 */
+function updateSettingsBtnVisibility(){
+  if (state === 'ready' || state === 'dead'){
+    // 如果設定面板正在顯示，不顯示按鈕
+    if (!settingsPanel.classList.contains('show')){
+      openBtn.style.display = 'block';
+    }
+  } else {
+    openBtn.style.display = 'none';
+  }
 }
 
 /* ===================== 主迴圈 ===================== */
@@ -2410,6 +1995,7 @@ function loop(now){
   last = now;
   try { update(dt); } catch(e){}
   try { draw(); } catch(e){}
+  updateSettingsBtnVisibility();
   requestAnimationFrame(loop);
 }
 
