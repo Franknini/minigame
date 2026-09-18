@@ -11,41 +11,79 @@
     touch-action:none;-webkit-user-select:none;user-select:none;
     -webkit-tap-highlight-color:transparent;overscroll-behavior:none;}
   canvas{display:block;width:100%;height:100%;cursor:crosshair;}
+
   #settingsPanel{
     position:fixed; top:0; left:0; width:100%; height:100%;
-    background:rgba(5,6,20,0.92); z-index:9999; display:none;
+    background:rgba(5,6,20,0.94); z-index:9999; display:none;
     overflow-y:auto; padding:20px; color:#eaf6ff;
     font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
   }
   #settingsPanel.show{ display:block; }
   #settingsPanel h2{ text-align:center; margin-bottom:16px; font-size:22px; }
+  #settingsPanel h3{ margin:18px 0 10px; font-size:15px; color:#5ef1ff;
+    border-bottom:1px solid rgba(94,241,255,0.25); padding-bottom:6px; }
   .setting-row{
     display:flex; align-items:center; justify-content:space-between;
-    margin-bottom:14px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.08);
+    margin-bottom:12px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.06);
   }
-  .setting-row label{ font-size:13px; flex:0 0 45%; }
-  .setting-row input[type=range]{ flex:1; margin:0 10px; }
-  .setting-row .val{ flex:0 0 45px; text-align:right; font-size:12px; color:#ffd76b; }
+  .setting-row label{ font-size:13px; flex:0 0 48%; }
+  .setting-row input[type=range]{ flex:1; margin:0 8px; }
+  .setting-row .val{ flex:0 0 46px; text-align:right; font-size:12px; color:#ffd76b; }
   .setting-row input[type=checkbox]{ width:18px; height:18px; }
+  .setting-row.disabled{ opacity:0.35; }
   #settingsPanel .btn-row{
-    display:flex; gap:10px; margin-top:20px; justify-content:center;
+    display:flex; gap:10px; margin-top:22px; justify-content:center;
   }
   #settingsPanel button{
     background:rgba(94,241,255,0.9); color:#000; border:none; border-radius:8px;
     padding:10px 20px; font-weight:bold; font-size:15px; cursor:pointer;
   }
   #settingsPanel button.reset{ background:rgba(255,120,160,0.9); }
+
   #openSettingsBtn{
     position:fixed; top:12px; right:12px; z-index:100;
     background:rgba(255,215,107,0.9); color:#000; border:none; border-radius:8px;
     padding:8px 14px; font-weight:bold; font-size:14px; cursor:pointer;
     display:none;
   }
+
+  #pauseBtn{
+    position:fixed; top:12px; right:12px; z-index:100;
+    background:rgba(94,241,255,0.9); color:#000; border:none; border-radius:8px;
+    padding:8px 14px; font-weight:bold; font-size:18px; cursor:pointer;
+    display:none; line-height:1;
+  }
+
+  #pauseMenu{
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(5,6,20,0.85); z-index:9998; display:none;
+    align-items:center; justify-content:center;
+    font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+    color:#eaf6ff;
+  }
+  #pauseMenu.show{ display:flex; }
+  #pauseMenu .box{
+    background:rgba(10,15,40,0.96); border-radius:16px;
+    padding:24px 28px; min-width:300px;
+    border:2px solid rgba(94,241,255,0.4);
+  }
+  #pauseMenu h2{ text-align:center; margin-bottom:20px; color:#5ef1ff; }
+  #pauseMenu .row{ display:flex; align-items:center; margin-bottom:14px; }
+  #pauseMenu .row label{ flex:0 0 90px; font-size:13px; }
+  #pauseMenu .row input[type=range]{ flex:1; margin:0 8px; }
+  #pauseMenu .row .val{ flex:0 0 40px; text-align:right; font-size:12px; color:#ffd76b; }
+  #pauseMenu button{
+    width:100%; padding:12px; margin-top:10px;
+    background:rgba(94,241,255,0.9); color:#000; border:none; border-radius:8px;
+    font-weight:bold; font-size:15px; cursor:pointer;
+  }
+  #pauseMenu button.quit{ background:rgba(255,120,160,0.9); }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <button id="openSettingsBtn">⚙ 設定</button>
+<button id="pauseBtn">⏸</button>
 
 <div id="settingsPanel">
   <h2>⚙ 遊戲設定</h2>
@@ -53,6 +91,24 @@
   <div class="btn-row">
     <button id="closeSettingsBtn">關閉</button>
     <button id="resetSettingsBtn" class="reset">恢復預設</button>
+  </div>
+</div>
+
+<div id="pauseMenu">
+  <div class="box">
+    <h2>⏸ 暫停</h2>
+    <div class="row">
+      <label>背景音效</label>
+      <input type="range" id="pauseMusicVol" min="0" max="100" step="1">
+      <span class="val" id="pauseMusicVal">60</span>
+    </div>
+    <div class="row">
+      <label>互動音效</label>
+      <input type="range" id="pauseSfxVol" min="0" max="100" step="1">
+      <span class="val" id="pauseSfxVal">100</span>
+    </div>
+    <button id="resumeBtn">繼續遊戲</button>
+    <button id="quitBtn" class="quit">退出遊戲</button>
   </div>
 </div>
 
@@ -74,6 +130,8 @@ var DEFAULT_CONFIG = {
   gravBottom: 260,
   gravLeft: 260,
   gravRight: 260,
+  gravityZeroPass: false,
+  bulletMaxDistance: 500,        // ★ 預設改 500
   normalBulletSpeed: 240,
   normalBulletInterval: 2.4,
   sniperBulletSpeed: 520,
@@ -82,14 +140,16 @@ var DEFAULT_CONFIG = {
   bombInterval: 7.0,
   bombFuse: 2.4,
   lightningSpeed: 82,
-  lightningInterval: 11.0
+  lightningInterval: 11.0,
+  musicVolume: 60,
+  sfxVolume: 100
 };
 
 var CONFIG = {};
 for (var k in DEFAULT_CONFIG) CONFIG[k] = DEFAULT_CONFIG[k];
 
 try {
-  var saved = localStorage.getItem('swapper_config_v1');
+  var saved = localStorage.getItem('swapper_config_v2');
   if (saved) {
     var parsed = JSON.parse(saved);
     for (var k2 in parsed) {
@@ -99,7 +159,12 @@ try {
 } catch(e){}
 
 function saveConfig(){
-  try { localStorage.setItem('swapper_config_v1', JSON.stringify(CONFIG)); } catch(e){}
+  try { localStorage.setItem('swapper_config_v2', JSON.stringify(CONFIG)); } catch(e){}
+}
+
+function hasAnyZeroGravity(){
+  return CONFIG.gravTop === 0 || CONFIG.gravBottom === 0 ||
+         CONFIG.gravLeft === 0 || CONFIG.gravRight === 0;
 }
 
 /* ===================== 基本環境 ===================== */
@@ -145,7 +210,7 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', function(){ setTimeout(resize, 150); });
 resize();
 
-/* ===================== 常數（非設定項） ===================== */
+/* ===================== 常數 ===================== */
 var PLAYER_R        = 14;
 var MAX_SPEED       = 1300;
 var WALL_BOUNCE     = 0.98;
@@ -159,6 +224,7 @@ var DANGER_R_BOMB   = 130;
 var DANGER_EXIT     = 1.35;
 var GRAZE_SCORE     = 180;
 var BOMB_GRAZE_SCORE= 260;
+var SWAP_KILL_SCORE = 220;
 var MAX_HP          = 3;
 var INVULN_HIT      = 1.6;
 var INVULN_SWAP     = 0.4;
@@ -187,6 +253,7 @@ var OBS_LIGHTNING_HP= 2.0;
 var OBS_LIGHTNING_REGEN = 2.5;
 var HEART_R         = 18;
 var HEART_LIFE      = 15.0;
+var BULLET_MAX_LIMIT = 5000;
 
 /* ===================== 狀態 ===================== */
 var state = 'ready';
@@ -233,33 +300,47 @@ var grazeCombo = 0;
 var grazeComboTimer = 0;
 var dangerActive = false;
 
-try { best = parseInt(localStorage.getItem('swapper12_best') || '0', 10) || 0; } catch(e){ best = 0; }
+try { best = parseInt(localStorage.getItem('swapper13_best') || '0', 10) || 0; } catch(e){ best = 0; }
 
-/* ===================== 音效 ===================== */
+/* ===================== 音訊 ===================== */
 var audioCtx = null;
+var sfxGain = null;
+var musicGain = null;
+
 function initAudio(){
   if (audioCtx) return;
   try {
     var AC = window.AudioContext || window.webkitAudioContext;
-    if (AC) audioCtx = new AC();
+    if (AC){
+      audioCtx = new AC();
+      sfxGain = audioCtx.createGain();
+      sfxGain.gain.value = CONFIG.sfxVolume / 100;
+      sfxGain.connect(audioCtx.destination);
+    }
   } catch(e){ audioCtx = null; }
 }
+
+function updateAudioVolumes(){
+  if (sfxGain) sfxGain.gain.value = CONFIG.sfxVolume / 100;
+  if (musicGain) musicGain.gain.value = CONFIG.musicVolume / 100;
+}
+
 function beep(freq, dur, type, vol){
-  if (!audioCtx) return;
+  if (!audioCtx || !sfxGain) return;
   try {
     var o = audioCtx.createOscillator();
     var g = audioCtx.createGain();
     o.type = type || 'sine';
     o.frequency.setValueAtTime(freq, audioCtx.currentTime);
     g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(vol || 0.07, audioCtx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime((vol || 0.07) * 1.8, audioCtx.currentTime + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-    o.connect(g); g.connect(audioCtx.destination);
+    o.connect(g); g.connect(sfxGain);
     o.start(); o.stop(audioCtx.currentTime + dur + 0.02);
   } catch(e){}
 }
 function sweep(f1, f2, dur, vol){
-  if (!audioCtx) return;
+  if (!audioCtx || !sfxGain) return;
   try {
     var o = audioCtx.createOscillator();
     var g = audioCtx.createGain();
@@ -267,9 +348,9 @@ function sweep(f1, f2, dur, vol){
     o.frequency.setValueAtTime(f1, audioCtx.currentTime);
     o.frequency.exponentialRampToValueAtTime(f2, audioCtx.currentTime + dur);
     g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(vol || 0.09, audioCtx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime((vol || 0.09) * 1.8, audioCtx.currentTime + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-    o.connect(g); g.connect(audioCtx.destination);
+    o.connect(g); g.connect(sfxGain);
     o.start(); o.stop(audioCtx.currentTime + dur + 0.02);
   } catch(e){}
 }
@@ -325,6 +406,28 @@ function collideBodies(a, b, restitution){
   a.vx -= j * nx / ma; a.vy -= j * ny / ma;
   b.vx += j * nx / mb; b.vy += j * ny / mb;
   return Math.abs(j);
+}
+
+/* 邊界處理（玩家/障礙物/光球） */
+function handleWall(obj, bounceFactor){
+  var m = obj.r;
+  var wrap = CONFIG.gravityZeroPass;
+  if (obj.x < m){
+    if (wrap && CONFIG.gravLeft === 0){ obj.x = W - m - 1; }
+    else { obj.x = m; obj.vx = Math.abs(obj.vx) * bounceFactor; }
+  }
+  if (obj.x > W - m){
+    if (wrap && CONFIG.gravRight === 0){ obj.x = m + 1; }
+    else { obj.x = W - m; obj.vx = -Math.abs(obj.vx) * bounceFactor; }
+  }
+  if (obj.y < m){
+    if (wrap && CONFIG.gravTop === 0){ obj.y = H - m - 1; }
+    else { obj.y = m; obj.vy = Math.abs(obj.vy) * bounceFactor; }
+  }
+  if (obj.y > H - m){
+    if (wrap && CONFIG.gravBottom === 0){ obj.y = m + 1; }
+    else { obj.y = H - m; obj.vy = -Math.abs(obj.vy) * bounceFactor; }
+  }
 }
 
 /* ===================== 重置 ===================== */
@@ -411,7 +514,8 @@ function spawnObstacle(inside){
     rot: Math.random()*Math.PI*2,
     rotV: (Math.random()-0.5)*3,
     hitGlow: 0, inside: false,
-    lightningExposure: 0, lightningGlow: 0
+    lightningExposure: 0, lightningGlow: 0,
+    swapTimer: 0
   });
 }
 
@@ -482,7 +586,9 @@ function fireBullet(x, y, angle, type){
     vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
     r: r, life: 12,
     inDanger: false, wasInDanger: false,
-    hitPlayer: false, safe: false
+    hitPlayer: false, safe: false,
+    traveled: 0,
+    entered: false        // ★ 新增：是否已進入過畫面內部
   };
   var pd = Math.hypot(b.x - player.x, b.y - player.y);
   if (pd < 130) b.safe = true;
@@ -502,7 +608,9 @@ function fireBomb(x, y, side){
     fuse: CONFIG.bombFuse + Math.random()*0.5,
     bombGrav: 340,
     inDanger: false, wasInDanger: false,
-    hitPlayer: false, safe: false
+    hitPlayer: false, safe: false,
+    traveled: 0,
+    entered: false
   };
   var pd = Math.hypot(b.x - player.x, b.y - player.y);
   if (pd < 150) b.safe = true;
@@ -592,6 +700,7 @@ function handleLeftAction(){
     if (state === 'dead' && dieTimer < 0.5) return;
     state = 'playing';
     reset();
+    startMusic();
     return;
   }
   if (state !== 'playing') return;
@@ -636,6 +745,7 @@ function doSwapWith(o){
   o.x = px; o.y = py;
   o.vx = pvx; o.vy = pvy;
   o.hitGlow = 0.7;
+  o.swapTimer = 0.5;
   spawnBurst(px, py, '94,241,255', 18, 1.2);
   spawnBurst(ox, oy, '255,160,90', 18, 1.2);
   spawnRing(px, py, '94,241,255', 80);
@@ -653,6 +763,17 @@ function breakObstacle(o){
   beep(280, 0.12, 'triangle', 0.08);
 }
 
+function checkSwapKillBonus(o){
+  if (o.swapTimer > 0){
+    var pts = Math.floor(SWAP_KILL_SCORE * Math.min(1 + grazeCombo * 0.5, 5));
+    score += pts;
+    grazeCombo++;
+    grazeComboTimer = COMBO_WINDOW;
+    showFloat(o.x, o.y - 30, '+' + pts + ' 交換擊破 x' + grazeCombo, '#ffd76b');
+    beep(1200, 0.13, 'triangle', 0.11);
+  }
+}
+
 /* ===================== 輸入 ===================== */
 function getLocalXY(e){
   var rect = canvas.getBoundingClientRect();
@@ -664,10 +785,12 @@ function getLocalXY(e){
 function onPointerDown(e){
   if (e && e.cancelable) e.preventDefault();
   initAudio();
+  if (state === 'paused') return;
   if (state === 'ready' || state === 'dead'){
     if (state === 'dead' && dieTimer < 0.5) return;
     state = 'playing';
     reset();
+    startMusic();
     return;
   }
   if (state !== 'playing') return;
@@ -686,7 +809,7 @@ function onPointerDown(e){
   }
 }
 function onPointerMove(e){
-  if (!stickActive) return;
+  if (!stickActive || state !== 'playing') return;
   var pid = (e.pointerId !== undefined) ? e.pointerId : 1;
   if (pid !== stickPointerId) return;
   var p = getLocalXY(e);
@@ -727,6 +850,7 @@ window.addEventListener('keydown', function(e){
   if (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowUp' || e.code === 'KeyW'){
     if (e.cancelable) e.preventDefault();
     if (e.repeat) return;
+    if (state === 'paused') return;
     handleLeftAction();
   }
 });
@@ -736,6 +860,9 @@ function update(rawDt){
   var dt = rawDt;
   if (dt > 0.05) dt = 0.05;
   if (dt < 0) dt = 0;
+
+  if (state === 'paused') return;
+
   dangerActive = false;
   for (var i=0;i<bullets.length;i++){
     if (bullets[i].inDanger && !bullets[i].safe){ dangerActive = true; break; }
@@ -806,11 +933,7 @@ function update(rawDt){
   }
   player.x += player.vx * sdt;
   player.y += player.vy * sdt;
-  var m = player.r;
-  if (player.x < m){ player.x = m; player.vx = Math.abs(player.vx)*WALL_BOUNCE; }
-  if (player.x > W-m){ player.x = W-m; player.vx = -Math.abs(player.vx)*WALL_BOUNCE; }
-  if (player.y < m){ player.y = m; player.vy = Math.abs(player.vy)*WALL_BOUNCE; }
-  if (player.y > H-m){ player.y = H-m; player.vy = -Math.abs(player.vy)*WALL_BOUNCE; }
+  handleWall(player, WALL_BOUNCE);
   trails.push({ x:player.x, y:player.y, life:0.3, maxLife:0.3 });
   if (trails.length > 26) trails.shift();
 
@@ -826,7 +949,6 @@ function update(rawDt){
       beep(880, 0.12, 'sine', 0.06);
     }
   }
-  // 愛心更新
   for (i=hearts.length-1;i>=0;i--){
     var h = hearts[i];
     h.life -= sdt;
@@ -875,6 +997,7 @@ function update(rawDt){
     o.x += o.vx * sdt; o.y += o.vy * sdt;
     o.rot += o.rotV * sdt;
     if (o.hitGlow > 0) o.hitGlow -= vdt * 1.6;
+    if (o.swapTimer > 0) o.swapTimer -= sdt;
     if (o.lightningExposure > 0){
       o.lightningExposure -= OBS_LIGHTNING_REGEN * sdt;
       if (o.lightningExposure < 0) o.lightningExposure = 0;
@@ -882,12 +1005,7 @@ function update(rawDt){
     if (o.lightningGlow > 0) o.lightningGlow -= vdt * 2.5;
     if (o.lightningGlow < 0) o.lightningGlow = 0;
     if (!o.inside && o.x > 0 && o.x < W && o.y > 0 && o.y < H) o.inside = true;
-    if (o.inside){
-      if (o.x < o.r){ o.x = o.r; o.vx = Math.abs(o.vx)*OBS_WALL; }
-      if (o.x > W-o.r){ o.x = W-o.r; o.vx = -Math.abs(o.vx)*OBS_WALL; }
-      if (o.y < o.r){ o.y = o.r; o.vy = Math.abs(o.vy)*OBS_WALL; }
-      if (o.y > H-o.r){ o.y = H-o.r; o.vy = -Math.abs(o.vy)*OBS_WALL; }
-    }
+    if (o.inside) handleWall(o, OBS_WALL);
     if (o.x < -200 || o.x > W+200 || o.y < -200 || o.y > H+200){
       if (Math.hypot(o.vx, o.vy) > 20 && !o.inside){
         obstacles.splice(i,1); continue;
@@ -969,6 +1087,7 @@ function update(rawDt){
         oo3.lightningExposure += sdt;
         oo3.lightningGlow = 1;
         if (oo3.lightningExposure >= OBS_LIGHTNING_HP){
+          checkSwapKillBonus(oo3);
           spawnBurst(oo3.x, oo3.y, '200,130,255', 22, 1.4);
           spawnRing(oo3.x, oo3.y, '200,130,255', 80);
           breakObstacle(oo3);
@@ -982,10 +1101,7 @@ function update(rawDt){
     var so = swapOrbs[i];
     so.x += so.vx * sdt; so.y += so.vy * sdt;
     so.life -= sdt;
-    if (so.x < so.r){ so.x = so.r; so.vx = Math.abs(so.vx)*ORB_WALL; }
-    if (so.x > W-so.r){ so.x = W-so.r; so.vx = -Math.abs(so.vx)*ORB_WALL; }
-    if (so.y < so.r){ so.y = so.r; so.vy = Math.abs(so.vy)*ORB_WALL; }
-    if (so.y > H-so.r){ so.y = H-so.r; so.vy = -Math.abs(so.vy)*ORB_WALL; }
+    handleWall(so, ORB_WALL);
     so.trail.push({ x:so.x, y:so.y, life:0.25, maxLife:0.25 });
     if (so.trail.length > 16) so.trail.shift();
     for (var ti=so.trail.length-1;ti>=0;ti--){
@@ -993,7 +1109,6 @@ function update(rawDt){
       if (so.trail[ti].life <= 0) so.trail.splice(ti,1);
     }
     if (so.life <= 0){ swapOrbs.splice(i, 1); continue; }
-    // 光球吃愛心
     if (CONFIG.orbCanEatHearts){
       for (var hi=hearts.length-1;hi>=0;hi--){
         var hh = hearts[hi];
@@ -1010,7 +1125,6 @@ function update(rawDt){
         }
       }
     }
-    // 光球撞子彈
     var orbHitByBullet = false;
     for (var bi=bullets.length-1;bi>=0;bi--){
       var bu = bullets[bi];
@@ -1030,7 +1144,6 @@ function update(rawDt){
       if (state !== 'playing') return;
       continue;
     }
-    // 光球撞障礙物
     var hitO = null;
     for (var j=0;j<obstacles.length;j++){
       var oo = obstacles[j];
@@ -1045,7 +1158,6 @@ function update(rawDt){
       if (state !== 'playing') return;
       continue;
     }
-    // 光球撞炸彈
     var hitB = false;
     for (var k=0;k<bullets.length;k++){
       var bb = bullets[k];
@@ -1092,17 +1204,49 @@ function update(rawDt){
       collideBodies(oA, bA, BOUNCE_REST_OB);
     }
   }
-  // 子彈更新
+  // ========== 子彈更新 ==========
   for (i=bullets.length-1;i>=0;i--){
     var b = bullets[i];
     if (b.type === 'bomb'){
       b.vy += b.bombGrav * sdt;
       b.x += b.vx * sdt; b.y += b.vy * sdt;
       b.fuse -= sdt;
-      if (b.x < b.r){ b.x = b.r; b.vx = Math.abs(b.vx)*0.72; }
-      if (b.x > W-b.r){ b.x = W-b.r; b.vx = -Math.abs(b.vx)*0.72; }
-      if (b.y < b.r){ b.y = b.r; b.vy = Math.abs(b.vy)*0.72; }
-      if (b.y > H-b.r){ b.y = H-b.r; b.vy = -Math.abs(b.vy)*0.72; }
+      b.traveled += Math.hypot(b.vx, b.vy) * sdt;
+
+      // 標記 entered：炸彈完全進入畫面內部才視為已進入
+      if (!b.entered){
+        if (b.x > b.r && b.x < W - b.r && b.y > b.r && b.y < H - b.r){
+          b.entered = true;
+        }
+      }
+
+      // 穿透模式：只有 entered 後才處理邊界
+      if (CONFIG.gravityZeroPass){
+        if (b.entered){
+          var bm = b.r;
+          if (b.x < bm && CONFIG.gravLeft === 0){ b.x = W - bm - 1; }
+          else if (b.x < bm){ b.x = bm; b.vx = Math.abs(b.vx)*0.72; }
+          if (b.x > W-bm && CONFIG.gravRight === 0){ b.x = bm + 1; }
+          else if (b.x > W-bm){ b.x = W-bm; b.vx = -Math.abs(b.vx)*0.72; }
+          if (b.y < bm && CONFIG.gravTop === 0){ b.y = H - bm - 1; }
+          else if (b.y < bm){ b.y = bm; b.vy = Math.abs(b.vy)*0.72; }
+          if (b.y > H-bm && CONFIG.gravBottom === 0){ b.y = bm + 1; }
+          else if (b.y > H-bm){ b.y = H-bm; b.vy = -Math.abs(b.vy)*0.72; }
+        }
+      } else {
+        if (b.x < b.r){ b.x = b.r; b.vx = Math.abs(b.vx)*0.72; }
+        if (b.x > W-b.r){ b.x = W-b.r; b.vx = -Math.abs(b.vx)*0.72; }
+        if (b.y < b.r){ b.y = b.r; b.vy = Math.abs(b.vy)*0.72; }
+        if (b.y > H-b.r){ b.y = H-b.r; b.vy = -Math.abs(b.vy)*0.72; }
+      }
+
+      // 行徑距離上限（只在穿透模式且距離有限時）
+      if (CONFIG.gravityZeroPass && CONFIG.bulletMaxDistance < BULLET_MAX_LIMIT
+          && b.traveled > CONFIG.bulletMaxDistance){
+        spawnBurst(b.x, b.y, '255,200,150', 8, 0.6);
+        bullets.splice(i, 1);
+        continue;
+      }
       var bd = Math.hypot(b.x - player.x, b.y - player.y);
       if (!b.safe){
         if (bd < DANGER_R_BOMB){ b.inDanger = true; b.wasInDanger = true; }
@@ -1150,15 +1294,50 @@ function update(rawDt){
     }
     b.x += b.vx * sdt; b.y += b.vy * sdt;
     b.life -= sdt;
-    if (b.x < -140 || b.x > W+140 || b.y < -140 || b.y > H+140){
-      if (b.wasInDanger && b.inDanger && !b.hitPlayer && !b.safe){
-        var outPts = GRAZE_SCORE * Math.min(1 + grazeCombo * 0.5, 5);
-        score += Math.floor(outPts); grazeCombo++;
-        grazeComboTimer = COMBO_WINDOW;
+    b.traveled += Math.hypot(b.vx, b.vy) * sdt;
+
+    // ★ 標記 entered：一般子彈完全進入畫面內部才視為已進入
+    if (!b.entered){
+      if (b.x > b.r && b.x < W - b.r && b.y > b.r && b.y < H - b.r){
+        b.entered = true;
       }
-      bullets.splice(i,1); continue;
+    }
+
+    // ★ 邊界處理
+    if (CONFIG.gravityZeroPass){
+      // 穿透模式：只有 entered 後才判定邊界，避免剛射出就被判撞牆
+      if (b.entered){
+        var bm2 = b.r;
+        if (b.x < bm2 && CONFIG.gravLeft === 0){ b.x = W - bm2 - 1; }
+        else if (b.x < bm2){ b.x = bm2; b.vx = Math.abs(b.vx); b.life = Math.min(b.life, 0.001); }
+        if (b.x > W-bm2 && CONFIG.gravRight === 0){ b.x = bm2 + 1; }
+        else if (b.x > W-bm2){ b.x = W-bm2; b.vx = -Math.abs(b.vx); b.life = Math.min(b.life, 0.001); }
+        if (b.y < bm2 && CONFIG.gravTop === 0){ b.y = H - bm2 - 1; }
+        else if (b.y < bm2){ b.y = bm2; b.vy = Math.abs(b.vy); b.life = Math.min(b.life, 0.001); }
+        if (b.y > H-bm2 && CONFIG.gravBottom === 0){ b.y = bm2 + 1; }
+        else if (b.y > H-bm2){ b.y = H-bm2; b.vy = -Math.abs(b.vy); b.life = Math.min(b.life, 0.001); }
+      }
+    } else {
+      // 非穿透模式：飛出 -140 到 W+140 範圍後消失
+      if (b.x < -140 || b.x > W+140 || b.y < -140 || b.y > H+140){
+        if (b.wasInDanger && b.inDanger && !b.hitPlayer && !b.safe){
+          var outPts = GRAZE_SCORE * Math.min(1 + grazeCombo * 0.5, 5);
+          score += Math.floor(outPts); grazeCombo++;
+          grazeComboTimer = COMBO_WINDOW;
+        }
+        bullets.splice(i,1); continue;
+      }
+    }
+
+    // 行徑距離上限
+    if (CONFIG.gravityZeroPass && CONFIG.bulletMaxDistance < BULLET_MAX_LIMIT
+        && b.traveled > CONFIG.bulletMaxDistance){
+      spawnBurst(b.x, b.y, '220,220,240', 8, 0.7);
+      bullets.splice(i, 1);
+      continue;
     }
     if (b.life <= 0){ bullets.splice(i,1); continue; }
+
     var nd = Math.hypot(b.x - player.x, b.y - player.y);
     if (!b.safe){
       if (nd < DANGER_R_NORMAL){ b.inDanger = true; b.wasInDanger = true; }
@@ -1179,6 +1358,7 @@ function update(rawDt){
       var dxo2 = b.x - oo2.x, dyo2 = b.y - oo2.y;
       var rro2 = b.r + oo2.r;
       if (dxo2*dxo2 + dyo2*dyo2 < rro2*rro2){
+        checkSwapKillBonus(oo2);
         breakObstacle(oo2);
         obstacles.splice(jj, 1);
         hitObstacle = true;
@@ -1213,10 +1393,11 @@ function die(){
   var fs = Math.floor(score);
   if (fs > best){
     best = fs;
-    try { localStorage.setItem('swapper12_best', String(best)); } catch(e){}
+    try { localStorage.setItem('swapper13_best', String(best)); } catch(e){}
   }
   beep(90, 0.5, 'sawtooth', 0.16);
   setTimeout(function(){ beep(60, 0.6, 'sine', 0.12); }, 100);
+  stopMusic();
 }
 
 /* ===================== 繪製 ===================== */
@@ -1550,10 +1731,14 @@ function draw(){
     o = obstacles[i];
     var glow = o.hitGlow > 0 ? o.hitGlow : 0;
     var lGlow = o.lightningGlow > 0 ? o.lightningGlow : 0;
+    var swapGlow = o.swapTimer > 0 ? Math.min(1, o.swapTimer / 0.5) : 0;
     ctx.save();
     if (lGlow > 0.1){
       ctx.shadowColor = 'rgba(200,120,255,' + (0.6 + lGlow*0.35) + ')';
       ctx.shadowBlur = 20 + lGlow*24;
+    } else if (swapGlow > 0.1){
+      ctx.shadowColor = 'rgba(255,215,107,' + (0.6 + swapGlow*0.4) + ')';
+      ctx.shadowBlur = 22 + swapGlow*20;
     } else {
       ctx.shadowColor = 'rgba(255,170,90,' + (0.55 + glow*0.4) + ')';
       ctx.shadowBlur = 16 + glow*20;
@@ -1561,6 +1746,8 @@ function draw(){
     var og = ctx.createRadialGradient(o.x - o.r*0.3, o.y - o.r*0.3, 0, o.x, o.y, o.r);
     if (lGlow > 0.3){
       og.addColorStop(0, '#f3e0ff'); og.addColorStop(1, '#a04de8');
+    } else if (swapGlow > 0.1){
+      og.addColorStop(0, '#fff5c8'); og.addColorStop(1, '#ffb84d');
     } else {
       og.addColorStop(0, glow > 0.3 ? '#fff0c8' : '#ffc98a');
       og.addColorStop(1, glow > 0.3 ? '#ff8844' : '#d9772e');
@@ -1569,7 +1756,7 @@ function draw(){
     ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
     ctx.translate(o.x, o.y); ctx.rotate(o.rot);
-    ctx.strokeStyle = 'rgba(255,255,255,' + (0.35 + glow*0.4 + lGlow*0.4) + ')';
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.35 + glow*0.4 + lGlow*0.4 + swapGlow*0.3) + ')';
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(0, 0, o.r * 0.55, 0, Math.PI * 1.3); ctx.stroke();
     ctx.restore();
@@ -1707,7 +1894,7 @@ function draw(){
       ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
       ctx.shadowBlur = 0;
       if (jumpCd > 0){
-        var jp = 1 - jumpCd / CONFIG.jumpCooldown;
+        var jp = 1 - jumpCd / Math.max(0.01, CONFIG.jumpCooldown);
         ctx.strokeStyle = 'rgba(255,215,107,0.8)';
         ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 5, -Math.PI/2, -Math.PI/2 + Math.PI*2*jp); ctx.stroke();
@@ -1803,7 +1990,7 @@ function drawHUD(){
     ctx.fillStyle = 'rgba(255,220,120,' + Math.min(1, grazeComboTimer/COMBO_WINDOW + 0.3) + ')';
     ctx.fillText('GRAZE x' + grazeCombo, W - 24, 70);
   }
-  if (state === 'playing'){
+  if (state === 'playing' || state === 'paused'){
     ctx.textAlign = 'left';
     ctx.font = '600 12px sans-serif';
     ctx.fillStyle = 'rgba(94,241,255,0.6)';
@@ -1835,13 +2022,11 @@ function drawHUD(){
     ctx.fillText('瞄準中點左半或按空白鍵可取消', W/2, H*0.10 + 84);
     ctx.font = '500 12px sans-serif';
     ctx.fillStyle = 'rgba(200,120,255,0.95)';
-    ctx.fillText('★ 紫色雷電會緩緩橫掠全場，碰到立即受傷', W/2, H*0.10 + 114);
+    ctx.fillText('★ 紫色雷電會緩緩橫掠全場', W/2, H*0.10 + 114);
     ctx.fillStyle = 'rgba(255,120,160,0.95)';
     ctx.fillText('★ 血量未滿時會出現愛心，吃到可補 1 顆血', W/2, H*0.10 + 134);
-    ctx.fillStyle = 'rgba(180,215,255,0.72)';
-    ctx.fillText('藍色光球可以穿透雷電　障礙物會被慢慢燒毀', W/2, H*0.10 + 158);
     ctx.fillStyle = 'rgba(255,180,120,0.95)';
-    ctx.fillText('存活越久分數越高，驚險逃離可累積 Combo', W/2, H*0.10 + 178);
+    ctx.fillText('交換後 0.5 秒內擊破障礙物 → 額外加分', W/2, H*0.10 + 154);
     var pulse = 0.55 + Math.sin(performance.now()/380)*0.45;
     ctx.globalAlpha = pulse;
     ctx.font = '700 19px sans-serif';
@@ -1855,38 +2040,543 @@ function drawHUD(){
     ctx.fillStyle = '#ff6b8a';
     ctx.shadowColor = 'rgba(255,60,100,0.85)';
     ctx.shadowBlur = 22;
-    ctx.fillText('結　束', W/2, H*0.26);
+    ctx.fillText('結　束', W/2, H*0.24);
     ctx.shadowBlur = 0;
     ctx.font = '700 66px sans-serif';
     ctx.fillStyle = '#eaf6ff';
-    ctx.fillText(String(Math.floor(score)), W/2, H*0.36);
+    ctx.fillText(String(Math.floor(score)), W/2, H*0.34);
     ctx.font = '500 14px sans-serif';
     if (score >= best && score > 0){
       ctx.fillStyle = '#ffd76b';
-      ctx.fillText('★ 新紀錄 ★', W/2, H*0.46);
+      ctx.fillText('★ 新紀錄 ★', W/2, H*0.44);
     } else {
       ctx.fillStyle = 'rgba(180,215,255,0.72)';
       var diff = Math.max(0, best - Math.floor(score));
-      ctx.fillText('最高分 ' + best + '　差 ' + diff + ' 分', W/2, H*0.46);
+      ctx.fillText('最高分 ' + best + '　差 ' + diff + ' 分', W/2, H*0.44);
     }
     ctx.fillStyle = 'rgba(140,220,180,0.9)';
     ctx.font = '600 14px sans-serif';
-    ctx.fillText('存活 ' + elapsed.toFixed(1) + ' 秒', W/2, H*0.54);
+    ctx.fillText('存活 ' + elapsed.toFixed(1) + ' 秒', W/2, H*0.52);
     ctx.fillStyle = 'rgba(140,220,180,0.7)';
     ctx.font = '500 12px sans-serif';
-    ctx.fillText('時間得分 ' + Math.floor(timeScore), W/2, H*0.58);
+    ctx.fillText('時間得分 ' + Math.floor(timeScore), W/2, H*0.56);
     ctx.fillStyle = 'rgba(255,215,107,0.7)';
-    ctx.fillText('驚險得分 ' + Math.floor(score - timeScore), W/2, H*0.62);
+    ctx.fillText('驚險得分 ' + Math.floor(score - timeScore), W/2, H*0.60);
     if (dieTimer > 0.5){
       var pulse2 = 0.55 + Math.sin(performance.now()/380)*0.45;
       ctx.globalAlpha = pulse2;
       ctx.font = '700 19px sans-serif';
       ctx.fillStyle = '#5ef1ff';
-      ctx.fillText('點一下再來一局', W/2, H*0.76);
+      ctx.fillText('點一下再來一局', W/2, H*0.74);
       ctx.globalAlpha = 1;
     }
   }
   ctx.restore();
+}
+
+/* =========================================================
+   背景音樂（v14 版）
+   ========================================================= */
+var musicPlaying = false;
+
+function startMusic(){
+  if (!audioCtx) return;
+  if (musicPlaying) return;
+  musicPlaying = true;
+
+  // ★ 建立新的 musicGain（每次進入遊戲都重新建立，避免被 stopMusic 斷開後無法恢復）
+  var localGain = audioCtx.createGain();
+  localGain.gain.value = CONFIG.musicVolume / 100;
+  localGain.connect(audioCtx.destination);
+  musicGain = localGain;
+
+  var mctx = audioCtx;
+  var masterLP = mctx.createBiquadFilter();
+  masterLP.type = 'lowpass';
+  masterLP.frequency.value = 3200;
+  masterLP.Q.value = 0.6;
+  masterLP.connect(localGain);
+
+  var delay = mctx.createDelay();
+  delay.delayTime.value = 0.32;
+  var delayFB = mctx.createGain();
+  delayFB.gain.value = 0.32;
+  var delayFilter = mctx.createBiquadFilter();
+  delayFilter.type = 'lowpass';
+  delayFilter.frequency.value = 2600;
+  var delayWet = mctx.createGain();
+  delayWet.gain.value = 0.35;
+  delay.connect(delayFilter);
+  delayFilter.connect(delayFB);
+  delayFB.connect(delay);
+  delayFilter.connect(delayWet);
+  delayWet.connect(masterLP);
+
+  var mix = mctx.createGain();
+  mix.gain.value = 1.0;
+  mix.connect(masterLP);
+
+  var phases = [
+    { name:'引子 · 只有 Pad', bars:4, bpm:96,
+      pad:1.0, bass:0, lead:0, arp:0, highLead:0, shimmer:0, bell:0,
+      kick:0, snare:0, hat:0, drumMode:'none', chordMode:'4bar', lp:3200 },
+    { name:'加入低音', bars:4, bpm:96,
+      pad:1.0, bass:0.85, lead:0, arp:0, highLead:0, shimmer:0, bell:0,
+      kick:0, snare:0, hat:0, drumMode:'none', chordMode:'4bar', lp:3400 },
+    { name:'加入主旋律', bars:4, bpm:96,
+      pad:0.95, bass:1.0, lead:0.75, arp:0.25, highLead:0, shimmer:0, bell:0,
+      kick:0, snare:0, hat:0.35, drumMode:'8th', chordMode:'4bar', lp:4000 },
+    { name:'加入輕鼓', bars:4, bpm:96,
+      pad:0.9, bass:1.0, lead:1.0, arp:0.5, highLead:0, shimmer:0, bell:0,
+      kick:0.55, snare:0.45, hat:0.55, drumMode:'8th', chordMode:'4bar', lp:4600 },
+    { name:'過門 · 準備高潮', bars:4, bpm:96, tailBeats:3, riserBars:4,
+      pad:0.9, bass:1.1, lead:1.0, arp:0.7, highLead:0, shimmer:0, bell:0,
+      kick:1.0, snare:0.95, hat:0.8, drumMode:'buildup', chordMode:'4bar', lp:5600 },
+    { name:'✦ 高潮', bars:24, bpm:144,
+      pad:1.05, bass:1.25, lead:1.25, arp:1.0,
+      highLead:0.9, shimmer:1.0, bell:0.85,
+      kick:1.3, snare:1.15, hat:1.1,
+      drumMode:'16th-varied', chordMode:'2bar', lp:7200 },
+    { name:'緩和', bars:8, bpm:96,
+      pad:1.0, bass:0.7, lead:0.5, arp:0.3, highLead:0, shimmer:0, bell:0,
+      kick:0, snare:0, hat:0.25, drumMode:'8th', chordMode:'4bar', lp:3400 }
+  ];
+
+  function nextPhaseIndex(i){
+    if (i >= phases.length - 1) return 4;
+    return i + 1;
+  }
+
+  var chords = [
+    { root: 220.00, notes: [220.00, 261.63, 329.63] },
+    { root: 174.61, notes: [174.61, 220.00, 261.63] },
+    { root: 261.63, notes: [261.63, 329.63, 392.00] },
+    { root: 196.00, notes: [196.00, 246.94, 293.66] }
+  ];
+  var melodies = [
+    [440.00, '', 392.00, '', 329.63, '', 392.00, 440.00],
+    [349.23, '', 329.63, '', 261.63, '', 329.63, 349.23],
+    [392.00, '', 523.25, '', 440.00, '', 392.00, 329.63],
+    [293.66, '', 392.00, '', 493.88, '', 392.00, 293.66]
+  ];
+
+  function playPad(freqs, t, dur, vol){
+    if (vol <= 0.01) return;
+    freqs.forEach(function(f){
+      for (var d = -1; d <= 1; d += 2){
+        var osc = mctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.value = f * (1 + d * 0.004);
+        osc.detune.value = d * 6;
+        var lp = mctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 1200;
+        lp.Q.value = 0.7;
+        var g = mctx.createGain();
+        g.gain.setValueAtTime(0.055 * vol, t);
+        g.gain.setValueAtTime(0.055 * vol, t + dur - 0.3);
+        g.gain.linearRampToValueAtTime(0.0001, t + dur);
+        osc.connect(lp); lp.connect(g); g.connect(mix);
+        osc.start(t); osc.stop(t + dur + 0.1);
+      }
+    });
+  }
+  function playBass(freq, t, dur, vol){
+    if (vol <= 0.01) return;
+    var osc = mctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    var g = mctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.22 * vol, t + 0.02);
+    g.gain.setValueAtTime(0.22 * vol, t + dur - 0.1);
+    g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    var lp = mctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 500;
+    osc.connect(lp); lp.connect(mix);
+    osc.start(t); osc.stop(t + dur + 0.05);
+  }
+  function playLead(freq, t, dur, vol){
+    if (vol <= 0.01) return;
+    var osc = mctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    var g = mctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.20 * vol, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(mix); g.connect(delay);
+    osc.start(t); osc.stop(t + dur + 0.05);
+  }
+  function playArp(freq, t, dur, vol){
+    if (vol <= 0.01) return;
+    var osc = mctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq * 2;
+    var g = mctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.09 * vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(mix); g.connect(delay);
+    osc.start(t); osc.stop(t + dur + 0.05);
+  }
+  function playHighLead(freqs, t, dur, vol){
+    if (vol <= 0.01) return;
+    freqs.forEach(function(f){
+      var osc = mctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = f * 2;
+      var g = mctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.04 * vol, t + 0.4);
+      g.gain.setValueAtTime(0.04 * vol, t + dur - 0.5);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      osc.connect(g); g.connect(mix); g.connect(delay);
+      osc.start(t); osc.stop(t + dur + 0.05);
+    });
+  }
+  function playShimmer(freqs, t, dur, vol){
+    if (vol <= 0.01) return;
+    freqs.forEach(function(f, idx){
+      var osc = mctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      var g = mctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.018 * vol, t + 0.5 + idx * 0.2);
+      g.gain.setValueAtTime(0.018 * vol, t + dur - 0.6);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      osc.connect(g); g.connect(mix); g.connect(delay);
+      osc.start(t); osc.stop(t + dur + 0.1);
+    });
+  }
+  function playBell(freq, t, vol){
+    if (vol <= 0.01) return;
+    var osc = mctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    var g = mctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.055 * vol, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+    osc.connect(g); g.connect(mix); g.connect(delay);
+    osc.start(t); osc.stop(t + 0.75);
+  }
+  function playKick(t, vol){
+    if (vol <= 0.01) return;
+    var osc = mctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(90, t);
+    osc.frequency.exponentialRampToValueAtTime(38, t + 0.14);
+    var g = mctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.4 * vol, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    osc.connect(g); g.connect(mix);
+    osc.start(t); osc.stop(t + 0.3);
+  }
+  function playSnare(t, vol){
+    if (vol <= 0.01) return;
+    var bufferSize = Math.floor(mctx.sampleRate * 0.15);
+    var buffer = mctx.createBuffer(1, bufferSize, mctx.sampleRate);
+    var data = buffer.getChannelData(0);
+    for (var i=0; i<bufferSize; i++){
+      var env = 1 - i / bufferSize;
+      data[i] = (Math.random()*2-1) * env;
+    }
+    var src = mctx.createBufferSource();
+    src.buffer = buffer;
+    var bp = mctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1800;
+    bp.Q.value = 0.8;
+    var g = mctx.createGain();
+    g.gain.setValueAtTime(0.12 * vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    src.connect(bp); bp.connect(g); g.connect(mix);
+    src.start(t);
+  }
+  function playHat(t, vol){
+    if (vol <= 0.01) return;
+    var bufferSize = Math.floor(mctx.sampleRate * 0.03);
+    var buffer = mctx.createBuffer(1, bufferSize, mctx.sampleRate);
+    var data = buffer.getChannelData(0);
+    for (var i=0; i<bufferSize; i++) data[i] = Math.random()*2-1;
+    var src = mctx.createBufferSource();
+    src.buffer = buffer;
+    var hp = mctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 7000;
+    var g = mctx.createGain();
+    g.gain.setValueAtTime(0.05 * vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+    src.connect(hp); hp.connect(g); g.connect(mix);
+    src.start(t);
+  }
+  function playTom(t, freq, vol){
+    if (vol <= 0.01) return;
+    var osc = mctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.6, t + 0.12);
+    var g = mctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.28 * vol, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    osc.connect(g); g.connect(mix);
+    osc.start(t); osc.stop(t + 0.22);
+  }
+  function playCrash(t, vol){
+    if (vol <= 0.01) return;
+    var bufferSize = Math.floor(mctx.sampleRate * 1.2);
+    var buffer = mctx.createBuffer(1, bufferSize, mctx.sampleRate);
+    var data = buffer.getChannelData(0);
+    for (var i=0; i<bufferSize; i++){
+      var env = Math.pow(1 - i / bufferSize, 1.5);
+      data[i] = (Math.random()*2-1) * env;
+    }
+    var src = mctx.createBufferSource();
+    src.buffer = buffer;
+    var hp = mctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 4000;
+    hp.Q.value = 0.6;
+    var g = mctx.createGain();
+    g.gain.setValueAtTime(0.22 * vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+    src.connect(hp); hp.connect(g); g.connect(mix);
+    src.start(t);
+  }
+  function playRiser4Layer(t, dur, vol){
+    if (vol <= 0.01) return;
+    var lowOsc = mctx.createOscillator();
+    lowOsc.type = 'sawtooth';
+    lowOsc.frequency.setValueAtTime(55, t);
+    lowOsc.frequency.exponentialRampToValueAtTime(220, t + dur);
+    var lowLP = mctx.createBiquadFilter();
+    lowLP.type = 'lowpass';
+    lowLP.frequency.setValueAtTime(200, t);
+    lowLP.frequency.exponentialRampToValueAtTime(1200, t + dur);
+    lowLP.Q.value = 2;
+    var lowG = mctx.createGain();
+    lowG.gain.setValueAtTime(0.0001, t);
+    lowG.gain.linearRampToValueAtTime(0.08 * vol, t + dur * 0.95);
+    lowG.gain.linearRampToValueAtTime(0.0001, t + dur);
+    lowOsc.connect(lowLP); lowLP.connect(lowG);
+    lowG.connect(mix); lowG.connect(delay);
+    lowOsc.start(t); lowOsc.stop(t + dur + 0.05);
+
+    var midOsc = mctx.createOscillator();
+    midOsc.type = 'sawtooth';
+    midOsc.frequency.setValueAtTime(220, t);
+    midOsc.frequency.exponentialRampToValueAtTime(880, t + dur);
+    var midLP = mctx.createBiquadFilter();
+    midLP.type = 'lowpass';
+    midLP.frequency.setValueAtTime(600, t);
+    midLP.frequency.exponentialRampToValueAtTime(3000, t + dur);
+    midLP.Q.value = 3;
+    var midG = mctx.createGain();
+    midG.gain.setValueAtTime(0.0001, t);
+    midG.gain.linearRampToValueAtTime(0.07 * vol, t + dur * 0.95);
+    midG.gain.linearRampToValueAtTime(0.0001, t + dur);
+    midOsc.connect(midLP); midLP.connect(midG);
+    midG.connect(mix); midG.connect(delay);
+    midOsc.start(t); midOsc.stop(t + dur + 0.05);
+
+    var highOsc = mctx.createOscillator();
+    highOsc.type = 'sine';
+    highOsc.frequency.setValueAtTime(880, t);
+    highOsc.frequency.exponentialRampToValueAtTime(3520, t + dur);
+    var highG = mctx.createGain();
+    highG.gain.setValueAtTime(0.0001, t);
+    highG.gain.linearRampToValueAtTime(0.04 * vol, t + dur * 0.95);
+    highG.gain.linearRampToValueAtTime(0.0001, t + dur);
+    highOsc.connect(highG);
+    highG.connect(mix); highG.connect(delay);
+    highOsc.start(t); highOsc.stop(t + dur + 0.05);
+
+    var bufSize = Math.floor(mctx.sampleRate * dur);
+    var noiseBuf = mctx.createBuffer(1, bufSize, mctx.sampleRate);
+    var nd = noiseBuf.getChannelData(0);
+    for (var ni = 0; ni < bufSize; ni++) nd[ni] = Math.random() * 2 - 1;
+    var nSrc = mctx.createBufferSource();
+    nSrc.buffer = noiseBuf;
+    var noiseBP = mctx.createBiquadFilter();
+    noiseBP.type = 'bandpass';
+    noiseBP.frequency.setValueAtTime(400, t);
+    noiseBP.frequency.exponentialRampToValueAtTime(6000, t + dur);
+    noiseBP.Q.value = 2;
+    var noiseG = mctx.createGain();
+    noiseG.gain.setValueAtTime(0.0001, t);
+    noiseG.gain.linearRampToValueAtTime(0.06 * vol, t + dur * 0.95);
+    noiseG.gain.linearRampToValueAtTime(0.0001, t + dur);
+    nSrc.connect(noiseBP); noiseBP.connect(noiseG);
+    noiseG.connect(mix); noiseG.connect(delay);
+    nSrc.start(t);
+  }
+  function drum8(barStart, beat, phase){
+    var eighth = beat / 2;
+    if (phase.kick > 0.01){ playKick(barStart, phase.kick); playKick(barStart + beat * 2, phase.kick); }
+    if (phase.snare > 0.01){ playSnare(barStart + beat, phase.snare); playSnare(barStart + beat * 3, phase.snare); }
+    if (phase.hat > 0.01){
+      for (var h = 0; h < 8; h++) playHat(barStart + h * eighth, h % 2 === 0 ? phase.hat : phase.hat * 0.5);
+    }
+  }
+  function drum16Varied(barStart, beat, phase, barIdx){
+    var sixteenth = beat / 4;
+    for (var s = 0; s < 16; s++){
+      var t = barStart + s * sixteenth;
+      var inBeat = s % 4;
+      var kickHit = (inBeat === 0);
+      if (barIdx % 2 === 1){ if (s === 6 || s === 14) kickHit = true; }
+      else { if (s === 8) kickHit = false; }
+      if (kickHit) playKick(t, phase.kick);
+      if (s === 4 || s === 12) playSnare(t, phase.snare);
+      if (barIdx % 4 === 2 && s === 7) playSnare(t, phase.snare * 0.55);
+      if (barIdx % 4 === 3 && s === 3) playSnare(t, phase.snare * 0.45);
+      playHat(t, inBeat === 0 ? phase.hat : phase.hat * 0.55);
+    }
+  }
+  function drumBuildUp(barStart, beat, phase, barInPhase){
+    var eighth = beat / 2;
+    var sixteenth = beat / 4;
+    var triplet12 = beat / 3;
+    var triplet24 = beat / 6;
+    if (barInPhase === 0){
+      for (var h = 0; h < 8; h++) playHat(barStart + h * eighth, h % 2 === 0 ? phase.hat : phase.hat * 0.5);
+      playKick(barStart, phase.kick); playKick(barStart + beat * 2, phase.kick);
+      playSnare(barStart + beat, phase.snare); playSnare(barStart + beat * 3, phase.snare);
+    } else if (barInPhase === 1){
+      for (var s = 0; s < 16; s++){
+        var t = barStart + s * sixteenth;
+        playHat(t, s % 4 === 0 ? phase.hat : phase.hat * 0.5);
+        if (s % 4 === 0) playKick(t, phase.kick);
+        if (s === 4 || s === 12) playSnare(t, phase.snare);
+      }
+    } else if (barInPhase === 2){
+      for (var s = 0; s < 12; s++){
+        var t = barStart + s * triplet12;
+        var beatPos = s % 3;
+        if (beatPos === 0) playKick(t, phase.kick);
+        var snVol = phase.snare * (0.4 + (s / 12) * 0.5);
+        playSnare(t, snVol);
+        playHat(t, beatPos === 0 ? phase.hat : phase.hat * 0.55);
+        if (s >= 6 && s % 3 === 0) playTom(t, 240 - (s - 6) * 20, phase.kick * 0.8);
+      }
+    } else {
+      for (var s = 0; s < 24; s++){
+        var t = barStart + s * triplet24;
+        var beatPos = s % 6;
+        if (beatPos === 0) playKick(t, phase.kick);
+        var snVol = phase.snare * (0.3 + (s / 24) * 0.7);
+        playSnare(t, snVol);
+        playHat(t, beatPos === 0 ? phase.hat : phase.hat * 0.5);
+        if (s >= 12 && s % 3 === 0) playTom(t, 240 - (s - 12) * 9, phase.kick * 0.8);
+      }
+      playKick(barStart + beat * 4 - 0.01, phase.kick * 1.3);
+    }
+  }
+  function scheduleBar(barStart, chordIdx, phase, barInLoop, barInPhase, beat){
+    var eighth = beat / 2;
+    var chord = chords[chordIdx];
+    if (phase.pad > 0.01){
+      var padDur = (phase.chordMode === '2bar') ? beat * 8 : beat * 4;
+      playPad(chord.notes, barStart, padDur, phase.pad);
+    }
+    if (phase.bass > 0.01){
+      for (var b = 0; b < 4; b++) playBass(chord.root / 2, barStart + b * beat, beat * 0.9, phase.bass);
+    }
+    if (phase.lead > 0.01){
+      var mel = melodies[chordIdx];
+      for (var m = 0; m < 8; m++){
+        if (mel[m] !== '') playLead(mel[m], barStart + m * eighth, eighth * 0.9, phase.lead);
+      }
+    }
+    if (phase.arp > 0.01){
+      for (var a = 0; a < 8; a++){
+        var noteIdx = a % 3;
+        playArp(chord.notes[noteIdx], barStart + a * eighth, eighth * 0.7, phase.arp);
+      }
+    }
+    if (phase.highLead > 0.01){
+      var highNotes = [chord.notes[1] * 2, chord.notes[2] * 2];
+      var hlDur = (phase.chordMode === '2bar') ? beat * 8 : beat * 4;
+      playHighLead(highNotes, barStart, hlDur, phase.highLead);
+    }
+    if (phase.shimmer > 0.01){
+      var shimmerNotes = [chord.notes[0]*4, chord.notes[1]*4, chord.notes[2]*4];
+      var sDur = (phase.chordMode === '2bar') ? beat * 8 : beat * 4;
+      playShimmer(shimmerNotes, barStart, sDur, phase.shimmer);
+    }
+    if (phase.bell > 0.01){
+      playBell(chord.notes[0] * 3, barStart, phase.bell);
+      playBell(chord.notes[2] * 3, barStart + beat * 2, phase.bell * 0.85);
+      if (barInPhase % 2 === 1) playBell(chord.notes[1] * 3, barStart + beat * 3.5, phase.bell * 0.7);
+    }
+    if (phase.drumMode === 'none'){}
+    else if (phase.drumMode === 'buildup') drumBuildUp(barStart, beat, phase, barInPhase);
+    else if (phase.drumMode === '16th-varied') drum16Varied(barStart, beat, phase, barInPhase);
+    else drum8(barStart, beat, phase);
+
+    masterLP.frequency.cancelScheduledValues(barStart);
+    masterLP.frequency.setValueAtTime(masterLP.frequency.value, barStart);
+    masterLP.frequency.linearRampToValueAtTime(phase.lp, barStart + beat * 2);
+  }
+
+  var phaseIndex = 0;
+  var barInPhase = 0;
+  var barCount = 0;
+  var nextBarTime = mctx.currentTime + 0.2;
+  var lookahead = 0.8;
+
+  function getChordIdx(){
+    var phase = phases[phaseIndex];
+    if (phase.chordMode === '2bar') return Math.floor(barCount / 2) % 4;
+    return barCount % 4;
+  }
+
+  function scheduler(){
+    if (!musicPlaying) return;
+    while (nextBarTime < mctx.currentTime + lookahead){
+      var phase = phases[phaseIndex];
+      var beat = 60 / phase.bpm;
+      var barDur = beat * 4;
+      if (barInPhase === 0 && phase.riserBars){
+        var riserDur = barDur * phase.riserBars;
+        playRiser4Layer(nextBarTime, riserDur, 1.2);
+      }
+      scheduleBar(nextBarTime, getChordIdx(), phase, barInPhase % 4, barInPhase, beat);
+      nextBarTime += barDur;
+      barCount++;
+      barInPhase++;
+      if (barInPhase >= phase.bars){
+        if (phase.tailBeats && phase.tailBeats > 0){
+          var tailStart = nextBarTime;
+          var tailDur = beat * (phase.tailBeats - 0.5);
+          playCrash(tailStart + tailDur, 1.2);
+          nextBarTime += tailDur;
+        }
+        phaseIndex = nextPhaseIndex(phaseIndex);
+        barInPhase = 0;
+      }
+    }
+    setTimeout(scheduler, 120);
+  }
+  scheduler();
+}
+
+// ★ 立即切斷背景音樂：把 musicGain 斷開並歸零
+function stopMusic(){
+  musicPlaying = false;
+  if (musicGain){
+    try {
+      musicGain.gain.cancelScheduledValues(audioCtx.currentTime);
+      musicGain.gain.setValueAtTime(0, audioCtx.currentTime);
+      musicGain.disconnect();
+    } catch(e){}
+    musicGain = null;
+  }
 }
 
 /* ===================== 設定面板 UI ===================== */
@@ -1897,6 +2587,7 @@ var resetBtn = document.getElementById('resetSettingsBtn');
 var slidersContainer = document.getElementById('slidersContainer');
 
 var sliderDefs = [
+  { section: '玩家' },
   { key: 'jumpImpulse', label: '彈跳力度', min: 0, max: 800, step: 10 },
   { key: 'jumpCooldown', label: '彈跳冷卻 (秒)', min: 0, max: 1.5, step: 0.05 },
   { key: 'initialObstacles', label: '初始障礙物數量', min: 0, max: 10, step: 1 },
@@ -1905,10 +2596,14 @@ var sliderDefs = [
   { key: 'maxHearts', label: '愛心畫面生成上限', min: 0, max: 5, step: 1 },
   { key: 'heartSpawnInterval', label: '愛心生成頻率 (秒)', min: 1, max: 20, step: 0.5 },
   { key: 'orbCanEatHearts', label: '交換光球可以吃愛心', type: 'checkbox' },
+  { section: '重力場' },
   { key: 'gravTop', label: '上邊重力場強度', min: 0, max: 600, step: 10 },
   { key: 'gravBottom', label: '下邊重力場強度', min: 0, max: 600, step: 10 },
   { key: 'gravLeft', label: '左邊重力場強度', min: 0, max: 600, step: 10 },
   { key: 'gravRight', label: '右邊重力場強度', min: 0, max: 600, step: 10 },
+  { key: 'gravityZeroPass', label: '引力是 0 時穿透', type: 'checkbox', dependsOnGravityZero: true },
+  { key: 'bulletMaxDistance', label: '子彈行徑距離', min: 200, max: 5000, step: 100, dependsOn: 'gravityZeroPass', specialMax: true },
+  { section: '攻擊' },
   { key: 'normalBulletSpeed', label: '普通子彈速度', min: 80, max: 800, step: 10 },
   { key: 'normalBulletInterval', label: '普通子彈生成頻率 (秒)', min: 0, max: 5, step: 0.1 },
   { key: 'sniperBulletSpeed', label: '狙擊子彈速度', min: 200, max: 1200, step: 20 },
@@ -1917,14 +2612,30 @@ var sliderDefs = [
   { key: 'bombInterval', label: '炸彈生成頻率 (秒)', min: 0, max: 10, step: 0.2 },
   { key: 'bombFuse', label: '炸彈出場到爆炸間隔 (秒)', min: 0.5, max: 5, step: 0.1 },
   { key: 'lightningSpeed', label: '雷電速度', min: 10, max: 300, step: 5 },
-  { key: 'lightningInterval', label: '雷電生成頻率 (秒)', min: 0, max: 20, step: 0.5 }
+  { key: 'lightningInterval', label: '雷電生成頻率 (秒)', min: 0, max: 20, step: 0.5 },
+  { section: '音效設定' },
+  { key: 'musicVolume', label: '背景音效', min: 0, max: 100, step: 1 },
+  { key: 'sfxVolume', label: '互動音效', min: 0, max: 100, step: 1 }
 ];
 
 function buildSettingsUI(){
   slidersContainer.innerHTML = '';
   sliderDefs.forEach(function(def){
+    if (def.section){
+      var h3 = document.createElement('h3');
+      h3.textContent = def.section;
+      slidersContainer.appendChild(h3);
+      return;
+    }
     var row = document.createElement('div');
     row.className = 'setting-row';
+    if (def.dependsOn){
+      row.dataset.dependsOn = def.dependsOn;
+      if (!CONFIG[def.dependsOn]) row.classList.add('disabled');
+    }
+    if (def.dependsOnGravityZero){
+      row.dataset.dependsOnGravityZero = '1';
+    }
     var label = document.createElement('label');
     label.textContent = def.label;
     row.appendChild(label);
@@ -1933,9 +2644,11 @@ function buildSettingsUI(){
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.checked = CONFIG[def.key];
+      cb.dataset.key = def.key;
       cb.addEventListener('change', function(){
         CONFIG[def.key] = cb.checked;
         saveConfig();
+        refreshDepends();
       });
       row.appendChild(cb);
     } else {
@@ -1945,18 +2658,65 @@ function buildSettingsUI(){
       slider.max = def.max;
       slider.step = def.step;
       slider.value = CONFIG[def.key];
+      if (def.dependsOn){
+        slider.disabled = !CONFIG[def.dependsOn];
+      }
       var val = document.createElement('span');
       val.className = 'val';
-      val.textContent = CONFIG[def.key];
+      val.textContent = (def.specialMax && CONFIG[def.key] >= def.max) ? '無限' : CONFIG[def.key];
       slider.addEventListener('input', function(){
         CONFIG[def.key] = parseFloat(slider.value);
-        val.textContent = CONFIG[def.key];
+        val.textContent = (def.specialMax && CONFIG[def.key] >= def.max) ? '無限' : CONFIG[def.key];
         saveConfig();
+        if (def.key === 'musicVolume' || def.key === 'sfxVolume') updateAudioVolumes();
+        // ★ 重力場拉桿變動時，重新檢查「引力是 0 時穿透」的可調狀態
+        if (def.key.indexOf('grav') === 0) refreshDepends();
       });
       row.appendChild(slider);
       row.appendChild(val);
     }
     slidersContainer.appendChild(row);
+  });
+  refreshDepends();
+}
+
+function refreshDepends(){
+  var rows = slidersContainer.querySelectorAll('.setting-row');
+  rows.forEach(function(r){
+    // 處理 gravityZeroPass 的特殊依賴：任一邊重力為 0 才能操作
+    if (r.dataset.dependsOnGravityZero === '1'){
+      var anyZero = hasAnyZeroGravity();
+      var cb = r.querySelector('input[type=checkbox]');
+      if (anyZero){
+        r.classList.remove('disabled');
+        if (cb) cb.disabled = false;
+      } else {
+        r.classList.add('disabled');
+        if (cb){
+          cb.disabled = true;
+          // 強制取消勾選
+          if (cb.checked){
+            cb.checked = false;
+            CONFIG.gravityZeroPass = false;
+            saveConfig();
+          }
+        }
+      }
+      return;
+    }
+    // 處理一般的 dependsOn（例如 bulletMaxDistance 依賴 gravityZeroPass）
+    var dep = r.dataset.dependsOn;
+    if (!dep) return;
+    var on = CONFIG[dep];
+    if (on){
+      r.classList.remove('disabled');
+      var inp = r.querySelector('input[type=range]');
+      if (inp) inp.disabled = false;
+    } else {
+      r.classList.add('disabled');
+      var inp2 = r.querySelector('input[type=range]');
+      if (inp2) inp2.disabled = true;
+    }
   });
 }
 
@@ -1968,25 +2728,68 @@ openBtn.addEventListener('click', function(){
 });
 closeBtn.addEventListener('click', function(){
   settingsPanel.classList.remove('show');
-  // 交給 updateSettingsBtnVisibility 自動決定是否顯示
 });
 resetBtn.addEventListener('click', function(){
   for (var k in DEFAULT_CONFIG) CONFIG[k] = DEFAULT_CONFIG[k];
   saveConfig();
+  updateAudioVolumes();
   buildSettingsUI();
 });
 
-/* ★ 設定按鈕顯示邏輯：ready 或 dead 狀態都顯示 */
-function updateSettingsBtnVisibility(){
-  if (state === 'ready' || state === 'dead'){
-    // 如果設定面板正在顯示，不顯示按鈕
-    if (!settingsPanel.classList.contains('show')){
-      openBtn.style.display = 'block';
-    }
-  } else {
-    openBtn.style.display = 'none';
-  }
+/* ===================== 暫停選單 ===================== */
+var pauseBtn = document.getElementById('pauseBtn');
+var pauseMenu = document.getElementById('pauseMenu');
+var resumeBtn = document.getElementById('resumeBtn');
+var quitBtn = document.getElementById('quitBtn');
+var pauseMusicVol = document.getElementById('pauseMusicVol');
+var pauseSfxVol = document.getElementById('pauseSfxVol');
+var pauseMusicVal = document.getElementById('pauseMusicVal');
+var pauseSfxVal = document.getElementById('pauseSfxVal');
+
+function syncPauseSliders(){
+  pauseMusicVol.value = CONFIG.musicVolume;
+  pauseSfxVol.value = CONFIG.sfxVolume;
+  pauseMusicVal.textContent = CONFIG.musicVolume;
+  pauseSfxVal.textContent = CONFIG.sfxVolume;
 }
+pauseMusicVol.addEventListener('input', function(){
+  CONFIG.musicVolume = parseInt(pauseMusicVol.value);
+  pauseMusicVal.textContent = CONFIG.musicVolume;
+  updateAudioVolumes();
+  saveConfig();
+});
+pauseSfxVol.addEventListener('input', function(){
+  CONFIG.sfxVolume = parseInt(pauseSfxVol.value);
+  pauseSfxVal.textContent = CONFIG.sfxVolume;
+  updateAudioVolumes();
+  saveConfig();
+});
+
+pauseBtn.addEventListener('click', function(){
+  if (state !== 'playing') return;
+  state = 'paused';
+  syncPauseSliders();
+  pauseMenu.classList.add('show');
+  pauseBtn.style.display = 'none';
+  if (audioCtx && audioCtx.state === 'running'){
+    audioCtx.suspend();
+  }
+});
+resumeBtn.addEventListener('click', function(){
+  state = 'playing';
+  pauseMenu.classList.remove('show');
+  pauseBtn.style.display = 'block';
+  if (audioCtx && audioCtx.state === 'suspended'){
+    audioCtx.resume();
+  }
+});
+quitBtn.addEventListener('click', function(){
+  pauseMenu.classList.remove('show');
+  pauseBtn.style.display = 'none';
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  state = 'playing';
+  die();
+});
 
 /* ===================== 主迴圈 ===================== */
 var last = performance.now();
@@ -1995,8 +2798,21 @@ function loop(now){
   last = now;
   try { update(dt); } catch(e){}
   try { draw(); } catch(e){}
-  updateSettingsBtnVisibility();
+  updateUIState();
   requestAnimationFrame(loop);
+}
+
+function updateUIState(){
+  if (state === 'ready' || state === 'dead'){
+    if (!settingsPanel.classList.contains('show')) openBtn.style.display = 'block';
+  } else {
+    openBtn.style.display = 'none';
+  }
+  if (state === 'playing'){
+    pauseBtn.style.display = 'block';
+  } else {
+    pauseBtn.style.display = 'none';
+  }
 }
 
 reset();
