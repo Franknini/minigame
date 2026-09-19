@@ -2956,11 +2956,12 @@ function updateUIState(){
   } else {
     pauseBtn.style.display = 'none';
   }
+}
 
- // 啟動時載入當前存檔槽
+/* ===================== 啟動 ===================== */
 loadSlot(activeSlot);
 updateSlotButtonsUI();
- 
+
 reset();
 state = 'ready';
 requestAnimationFrame(loop);
