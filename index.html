@@ -7,13 +7,11 @@
 <title>意念之間</title>
 <style>
    /* 存檔槽按鈕 */
-  #saveSlots {
-    position: fixed;
-    top: 8px;
-    left: 12px;
-    z-index: 60;
+   #saveSlots {
     display: flex;
     gap: 6px;
+    flex: 1;
+    justify-content: flex-end
   }
   .save-slot {
     background: rgba(20,30,60,0.7);
@@ -50,7 +48,14 @@
     font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
   }
   #settingsPanel.show{ display:block; }
-  #settingsPanel h2{ text-align:center; margin-bottom:16px; font-size:22px; }
+    #settingsPanel h2{ text-align:left; margin:0; font-size:22px; flex:0 0 auto; }
+  .settings-header{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
   #settingsPanel h3{ margin:18px 0 10px; font-size:15px; color:#5ef1ff;
     border-bottom:1px solid rgba(94,241,255,0.25); padding-bottom:6px; }
   .setting-row{
@@ -115,17 +120,18 @@
 <body>
 <canvas id="c"></canvas>
 
- <div id="saveSlots">
-  <button class="save-slot" data-slot="1">儲存一</button>
-  <button class="save-slot" data-slot="2">儲存二</button>
-  <button class="save-slot" data-slot="3">儲存三</button>
-</div>
- 
 <button id="openSettingsBtn">⚙ 設定</button>
 <button id="pauseBtn">⏸</button>
 
 <div id="settingsPanel">
-  <h2>⚙ 遊戲設定</h2>
+  <div class="settings-header">
+    <h2>⚙ 遊戲設定</h2>
+    <div id="saveSlots">
+      <button class="save-slot" data-slot="1">儲存一</button>
+      <button class="save-slot" data-slot="2">儲存二</button>
+      <button class="save-slot" data-slot="3">儲存三</button>
+    </div>
+  </div>
   <div id="slidersContainer"></div>
   <div class="btn-row">
     <button id="closeSettingsBtn">關閉</button>
@@ -2004,17 +2010,17 @@ function drawHUD(){
   ctx.fillStyle = '#eaf6ff';
   ctx.shadowColor = 'rgba(94,241,255,0.7)';
   ctx.shadowBlur = 16;
-  ctx.fillText(String(Math.floor(score)), 22, 52);
+  ctx.fillText(String(Math.floor(score)), 22, 18);
   ctx.shadowBlur = 0;
   ctx.font = '600 12px sans-serif';
   ctx.fillStyle = 'rgba(180,215,255,0.65)';
-  ctx.fillText('BEST  ' + best, 24, 104);
+  ctx.fillText('BEST  ' + best, 24, 70);
   ctx.font = '600 12px sans-serif';
   ctx.fillStyle = 'rgba(140,220,180,0.85)';
-  ctx.fillText('TIME  ' + elapsed.toFixed(1) + 's', 24, 122);
+  ctx.fillText('TIME  ' + elapsed.toFixed(1) + 's', 24, 88);
   var rate = TIME_SCORE_BASE * (1 + elapsed / TIME_SCORE_RAMP);
   ctx.fillStyle = 'rgba(140,220,180,0.55)';
-  ctx.fillText('+' + rate.toFixed(1) + '/s', 24, 140);
+  ctx.fillText('+' + rate.toFixed(1) + '/s', 24, 106);
   ctx.textAlign = 'right';
   for (var i=0;i<MAX_HP;i++){
     var hx = W - 24 - i*30, hy = 30;
@@ -2950,17 +2956,6 @@ function updateUIState(){
   } else {
     pauseBtn.style.display = 'none';
   }
-
-  // ★ 存檔槽按鈕：只在 ready / dead 顯示（遊戲進行中隱藏）
-  var slotEl = document.getElementById('saveSlots');
-  if (slotEl){
-    if (state === 'ready' || state === 'dead'){
-      slotEl.style.display = 'flex';
-    } else {
-      slotEl.style.display = 'none';
-    }
-  }
-}
 
  // 啟動時載入當前存檔槽
 loadSlot(activeSlot);
